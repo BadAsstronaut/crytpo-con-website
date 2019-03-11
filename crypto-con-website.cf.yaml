@@ -4,21 +4,156 @@ Parameters:
   S3Bucket:
     Description: S3 Bucket with Lambda source
     Type: String
-  S3Key:
+  S3GlobeePaymentKey:
     Description: Path of the source code .zip file
     Type: String
-    Default: lambda.zip
 
 Resources:
   InventoryTable:
     Type: AWS::DynamoDB::Table
     Properties:
+      TableName: Inventory
       AttributeDefinitions:
-        - AttributeName:
-          AttributeType:
+        - AttributeName: TicketTierName
+          AttributeType: "S"
+        - AttributeName: CurrentPrice
+          AttributeType: "N"
+        - AttributeName: InitialInventory
+          AttributeType: "N"
+        - AttributeName: Available
+          AttributeType: "N"
       KeySchema:
-        - AttributeName:
-          KeyType:
+        - AttributeName: TicketTeirName
+          KeyType: HASH
+      ProvisionedThroughput:
+        ReadCapacityUnits: 3
+        WriteCapacityUnits: 3
+
+  AttendeesTable:
+    Type: AWS::DynamoDB::Table
+    Properties:
+      TableName: Attendees
+      AttributeDefinitions:
+        - AttributeName: Id
+          AttributeType: "S"
+        - AttributeName: Name
+          AttributeType: "S"
+        - AttributeName: Email
+          AttributeType: "S"
+        - AttributeName: TicketTierName
+          AttributeType: "S"
+        - AttributeName: ConfirmationKey
+          AttributeType: "S"
+        - AttributeName: PurchaseId
+          AttributeType: "S"
+      KeySchema:
+        - AttributeName: Id
+          KeyType: HASH
+      ProvisionedThroughput:
+        ReadCapacityUnits: 3
+        WriteCapacityUnits: 3
+
+  PurchasesTable:
+    Type: AWS::DynamoDB::Table
+    Properties:
+      TableName: Purchases
+      AttributeDefinitions:
+        - AttributeName: Id
+          AttributeType: "S"
+        - AttributeName: ProcessingType
+          AttributeType: "S"
+        - AttributeName: Details # JSON Blob of stripe or globee transaction
+          AttributeType: "S"
+      KeySchema:
+        - AttributeName: Id
+          KeyType: UUID
+      ProvisionedThroughput:
+        ReadCapacityUnits: 3
+        WriteCapacityUnits: 3
+
+  LambdaRole:
+    Type: AWS::IAM::Role
+    Properties:
+      AssumeRolePolicyDocument:
+        Version: 2012-10-17
+        Statement:
+          - Effect: Allow
+            Principal:
+              Service: lambda.amazonaws.com
+            Action:
+              - sts:AssumeRole
+      Path: "/"
+      Policies:
+        - PolicyName: logs
+          PolicyDocument:
+            Version: "2012-10-17"
+            Statement:
+              - Effect: Allow
+                Action:
+                  - logs:*
+                Resource: arn:aws:logs:*:*:*
+        - PolicyName: dynamodb
+          PolicyDocument:
+            Version: "2012-10-17"
+            Statement:
+              - Sid: "1"
+                Effect: Allow
+                Action:
+                  - dynamodb:Scan
+                  - dynamodb:PutItem
+                  - dynamodb:GetItem
+                  - dynamodb:DeleteItem
+                  - dynamodb:Query
+                  - dynamodb:UpdateItem
+                Resource:
+                  - Fn::Join:
+                      - ""
+                      - - "arn:aws:dynamodb:"
+                        - Ref: AWS::Region
+                        - ":"
+                        - Ref: AWS::AccountId
+                        - ":table/Inventory*"
+                  - Fn::Join:
+                      - ""
+                      - - "arn:aws:dynamodb:"
+                        - Ref: AWS::Region
+                        - ":"
+                        - Ref: AWS::AccountId
+                        - ":table/Attendees*"
+                  - Fn::Join:
+                      - ""
+                      - - "arn:aws:dynamodb:"
+                        - Ref: AWS::Region
+                        - ":"
+                        - Ref: AWS::AccountId
+                        - ":table/Resources*"
+
+  GlobeePaymentFunction:
+    Type: AWS::Lambda::Function
+    Properties:
+      Code:
+        S3Bucket: !Ref S3Bucket
+        S3Key: !Ref S3GlobeePaymentKey
+      Handler: globeePayment
+      Role: !GetAtt LambdaRole.Arn
+      Runtime: nodejs8.10
+
+  GlobeePaymentPermission:
+    Type: AWS::Lambda::Permission
+    Properties:
+      Action: lambda:invokeFunction
+      FunctionName: !GetAtt GlobeePaymentFunction.Arn
+      Principal: apigateway.amazonaws.com
+      SourceArn: |
+        !Join:
+          - ''
+          - - 'arn:aws:execute-api:'
+          - Ref: AWS::Region
+          - ":"
+          - Ref: AWS::AccountId
+          - ":"
+          - Ref: RestApi
+          - "/globee-payment*"
 
   RestApi:
     Type: AWS::ApiGateway::RestApi

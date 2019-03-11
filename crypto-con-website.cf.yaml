@@ -1,0 +1,125 @@
+AWSTemplateFormatVersion: 2010-09-09
+
+Parameters:
+  S3Bucket:
+    Description: S3 Bucket with Lambda source
+    Type: String
+  S3Key:
+    Description: Path of the source code .zip file
+    Type: String
+    Default: lambda.zip
+
+Resources:
+  InventoryTable:
+    Type: AWS::DynamoDB::Table
+    Properties:
+      AttributeDefinitions:
+        - AttributeName:
+          AttributeType:
+      KeySchema:
+        - AttributeName:
+          KeyType:
+
+  RestApi:
+    Type: AWS::ApiGateway::RestApi
+    Properties:
+      Name: crypto-conference-payments
+      Description: Crypto Conference Website Payments
+
+  GlobeePaymentResource:
+    Type: AWS::ApiGateway::Resource
+    Properties:
+      ParentId: !GetAtt RestApi.RootResourceId
+      PathPart: globee-payment
+      RestApiId: !Ref RestApi
+
+  GlobeeOptionsMethod:
+    Type: AWS::ApiGateway::Method
+    Properties:
+      ResourceId: !Ref GlobeePaymentResource
+      RestApiId: !Ref RestApi
+      AuthorizationType: NONE
+      HttpMethod: OPTIONS
+      Integration:
+        Type: MOCK
+        IntegrationResponses:
+          - ResponseParameters:
+              method.response.header.Access-Control-Allow-Headers: "'Content-Type,X-Api-Key'"
+              method.response.header.Access-Control-AllowMethods: "'GET,POST,OPTIONS'"
+              mothod.response.header.Access-Control-Allow-Origin: "'*'" # RESTRICT TO SITE BEFORE PROD!
+            ResponseTemplates:
+              application/json: ""
+            StatusCode: "200"
+        PassthroughBehavior: NEVER
+        RequestTemplates:
+          application/json: '{"statusCode":200}'
+      MethodResponses:
+        - ResponseModels:
+            application/json: Empty
+          ResponseParameters:
+            method.response.header.Access-Control-Allow-Headers: true
+            method.response.header.Access-Control-Allow-Methods: true
+            method.response.header.Access-Control-Allow-Origin: true
+          StatusCode: "200"
+
+  GlobeePaymentPostMethod:
+    Type: AWS::ApiGateway::Method
+    Properties:
+      ResourceId: !Ref GlobeePaymentResource
+      RestApiId: !Ref RestApi
+      HttpMethod: POST
+      AuthorizationType: NONE
+      Integration:
+        Type: AWS
+        IntegrationHttpMethod: POST
+        Uri: |
+          !Join 
+            - ""
+            - - arn:aws:apigateway:
+              - !Ref AWS::Region
+              - :lambda:path/2015-03-31/functions/
+              - !GetAtt Lambda.Arn
+              - /invocations
+        IntegrationResponses:
+          - ResponseTemplates:
+              application/json: "$input.json('$.body')"
+            StatusCode: "200"
+        PassthroughBehavior: NEVER
+        RequestTemplates:
+          application/json: "$input.json('$.body')"
+      MethodResponses:
+        - ResponseModels:
+            application/json: !Ref GlobeePaymentModel
+          StatusCode: "200"
+
+  GlobeePaymentModel:
+    Type: AWS::ApiGateway::Model
+    Properties:
+      RestApiId: !Ref restApi
+      ContentType: application/json
+      Description: Inputs for crypto payment with globee
+      Name: GlobeePaymentModel
+      Schema:
+        "$schema": http://json-schema.org/draft-04/schema#
+        title: GlobeePaymentModel
+        type: object
+        properties:
+          id:
+            type: string
+          status:
+            type: string
+          total:
+            type: number
+          currency:
+            type: string
+          customer:
+            type: object
+            properties:
+              name:
+                type: string
+              email:
+                type: string
+          redirect_url:
+            type: string
+          success_url:
+            type: string

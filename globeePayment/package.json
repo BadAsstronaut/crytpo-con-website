@@ -1,0 +1,11 @@
+{
+  "name": "globee-payment",
+  "version": "1.0.0",
+  "description": "Lambda handler for processing pay with Globee requests",
+  "main": "globeePayment.js",
+  "scripts": {
+    "test": "echo \"Error: no test specified\" && exit 1"
+  },
+  "author": "",
+  "license": "ISC"
+}

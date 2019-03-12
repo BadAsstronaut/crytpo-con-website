@@ -64,13 +64,22 @@ Resources:
               Service: lambda.amazonaws.com
             Action:
               - sts:AssumeRole
-      Path: "/"
       Policies:
-        - PolicyName: dynamodb
+        - PolicyName: logs
           PolicyDocument:
             Version: "2012-10-17"
             Statement:
               - Sid: "1"
+                Effect: Allow
+                Action:
+                  - logs:*
+                Resource:
+                  - arn:aws:logs:*:*:*
+        - PolicyName: dynamodb
+          PolicyDocument:
+            Version: "2012-10-17"
+            Statement:
+              - Sid: "2"
                 Effect: Allow
                 Action:
                   - dynamodb:Scan
@@ -91,7 +100,7 @@ Resources:
       Code:
         S3Bucket: !Ref S3Bucket
         S3Key: !Ref S3GlobeePaymentKey
-      Handler: globeePayment
+      Handler: index.globeePayment
       Role: !GetAtt LambdaRole.Arn
       Runtime: nodejs8.10
 
@@ -154,40 +163,9 @@ Resources:
       HttpMethod: POST
       AuthorizationType: NONE
       Integration:
-        Type: AWS
+        Type: AWS_PROXY
         IntegrationHttpMethod: POST
         Uri: !Sub arn:aws:apigateway:${AWS::Region}:lambda:path/2015-03-31/functions/${GlobeePaymentFunction.Arn}/invocations
-        IntegrationResponses:
-          - ResponseTemplates:
-              application/json: "$input.json('$.body')"
-            StatusCode: "200"
-        PassthroughBehavior: NEVER
-        RequestTemplates:
-          application/json: "$input.json('$.body')"
-      MethodResponses:
-        - ResponseModels:
-            application/json: !Ref GlobeePaymentModel
-          StatusCode: "200"
-
-  # API Gateway Models
-  GlobeePaymentModel:
-    Type: AWS::ApiGateway::Model
-    Properties:
-      RestApiId: !Ref RestApi
-      ContentType: application/json
-      Description: Inputs for crypto payment with globee
-      Name: GlobeePaymentModel
-      Schema:
-        "$schema": http://json-schema.org/draft-04/schema#
-        title: GlobeePaymentModel
-        type: object
-        properties:
-          status:
-            type: string
-          redirect_url:
-            type: string
-          success_url:
-            type: string
 
   # API Gateway Deployments
   RestApiDeployment:
@@ -195,3 +173,6 @@ Resources:
     Properties:
       RestApiId: !Ref RestApi
       StageName: v1
+    DependsOn:
+      - GlobeeOptionsMethod
+      - GlobeePaymentPostMethod

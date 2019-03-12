@@ -188,6 +188,7 @@ Resources:
             type: string
           success_url:
             type: string
+
   # API Gateway Deployments
   RestApiDeployment:
     Type: AWS::ApiGateway::Deployment

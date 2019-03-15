@@ -1,0 +1,55 @@
+{
+  "CryptoCon": [
+    {
+      "PutRequest": {
+        "Item": {
+          "PartitionKey": {
+            "S": "ticketTier_general"
+          },
+          "SortKey": {
+            "S": "inventory"
+          },
+          "Total": {
+            "N": 200
+          }
+        }
+      }
+    },
+    {
+      "PutRequest": {
+        "Item": {
+          "PartitionKey": {
+            "S": "ticketTier_general"
+          },
+          "SortKey": {
+            "S": "price"
+          },
+          "PricingMap": {
+            "M": {
+              "ByDate": {
+                "L": [
+                  {
+                    "Price": {
+                      "N": "200.00"
+                    },
+                    "EndDate": {
+                      "S": "2019-05-15T00:00:00.000Z"
+                    }
+                  },
+                  {
+                    "Price": {
+                      "N": "260.00"
+                    },
+                    "EndDate": {
+                      "S": "2019-06-20T00:00:00.000Z"
+                    }
+                  }
+                ]
+              }
+            }
+          }
+        }
+      }
+    }
+  ]
+}

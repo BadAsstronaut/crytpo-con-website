@@ -5,52 +5,31 @@ Parameters:
     Description: S3 Bucket with Lambda source
     Type: String
   S3GlobeePaymentKey:
-    Description: Path of the source code .zip file
+    Description: Path of the source code .zip file to process Globee payments
+    Type: String
+  S3InitKey:
+    Description: Path of the source code .zip file to load the initial db state
     Type: String
 
 Resources:
-  # DynamoDB tables
+  # DynamoDB table
   InventoryTable:
     Type: AWS::DynamoDB::Table
     Properties:
-      TableName: Inventory
+      TableName: CryptoCon
       AttributeDefinitions:
-        - AttributeName: TicketTierName
+        - AttributeName: PartitionKey
+          AttributeType: "S"
+        - AttributeName: SortKey
           AttributeType: "S"
       KeySchema:
-        - AttributeName: TicketTierName
+        - AttributeName: PartitionKey
           KeyType: HASH
+        - AttributeName: SortKey
+          KeyType: RANGE
       ProvisionedThroughput:
-        ReadCapacityUnits: 3
-        WriteCapacityUnits: 3
-
-  AttendeesTable:
-    Type: AWS::DynamoDB::Table
-    Properties:
-      TableName: Attendees
-      AttributeDefinitions:
-        - AttributeName: Id
-          AttributeType: "S"
-      KeySchema:
-        - AttributeName: Id
-          KeyType: HASH
-      ProvisionedThroughput:
-        ReadCapacityUnits: 3
-        WriteCapacityUnits: 3
-
-  PurchasesTable:
-    Type: AWS::DynamoDB::Table
-    Properties:
-      TableName: Purchases
-      AttributeDefinitions:
-        - AttributeName: Id
-          AttributeType: "S"
-      KeySchema:
-        - AttributeName: Id
-          KeyType: HASH
-      ProvisionedThroughput:
-        ReadCapacityUnits: 3
-        WriteCapacityUnits: 3
+        ReadCapacityUnits: 2
+        WriteCapacityUnits: 2
 
   # IAM Roles
   LambdaRole:
@@ -82,18 +61,21 @@ Resources:
               - Sid: "2"
                 Effect: Allow
                 Action:
-                  - dynamodb:Scan
-                  - dynamodb:PutItem
-                  - dynamodb:GetItem
-                  - dynamodb:DeleteItem
-                  - dynamodb:Query
-                  - dynamodb:UpdateItem
+                  - dynamodb:*
                 Resource:
-                  - !Sub arn:aws:dynamodb:${AWS::Region}:${AWS::AccountId}:table/Inventory*
-                  - !Sub arn:aws:dynamodb:${AWS::Region}:${AWS::AccountId}:table/Attendees*
-                  - !Sub arn:aws:dynamodb:${AWS::Region}:${AWS::AccountId}:table/Resources*
+                  - !Sub arn:aws:dynamodb:${AWS::Region}:${AWS::AccountId}:table/CryptoCon*
 
   # Lambdas & Lambda permissions
+  InitFunction:
+    Type: AWS::Lambda::Function
+    Properties:
+      Code:
+        S3Bucket: !Ref S3Bucket
+        S3Key: !Ref S3InitKey
+      Handler: index.handler
+      Role: !GetAtt LambdaRole.Arn
+      Runtime: nodejs8.10
+
   GlobeePaymentFunction:
     Type: AWS::Lambda::Function
     Properties:
@@ -166,6 +148,22 @@ Resources:
         Type: AWS_PROXY
         IntegrationHttpMethod: POST
         Uri: !Sub arn:aws:apigateway:${AWS::Region}:lambda:path/2015-03-31/functions/${GlobeePaymentFunction.Arn}/invocations
+
+  # Custom
+  InitTable:
+    Type: Custom::InitFunction
+    DependsOn: InventoryTable
+    Properties:
+      AutoMinorVersionUpgrade:
+      BrokerName:
+      DeploymentMode:
+      EngineType:
+      EngineVersion:
+      HostInstanceType:
+      PubliclyAccessible:
+      Users:
+        - Password:
+          Username:
 
   # API Gateway Deployments
   RestApiDeployment:

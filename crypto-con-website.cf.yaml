@@ -13,7 +13,7 @@ Parameters:
 
 Resources:
   # DynamoDB table
-  InventoryTable:
+  CryptoConTable:
     Type: AWS::DynamoDB::Table
     Properties:
       TableName: CryptoCon
@@ -151,19 +151,10 @@ Resources:
 
   # Custom
   InitTable:
-    Type: Custom::InitFunction
-    DependsOn: InventoryTable
+    Type: AWS::CloudFormation::CustomResource
+    DependsOn: CryptoConTable
     Properties:
-      AutoMinorVersionUpgrade:
-      BrokerName:
-      DeploymentMode:
-      EngineType:
-      EngineVersion:
-      HostInstanceType:
-      PubliclyAccessible:
-      Users:
-        - Password:
-          Username:
+      ServiceToken: !GetAtt InitFunction.Arn
 
   # API Gateway Deployments
   RestApiDeployment:

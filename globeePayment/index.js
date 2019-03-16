@@ -1,5 +1,7 @@
 'use strict';
 
+require('dotenv').config();
+
 const aws = require('aws-sdk');
 const requester = require('request-promise-native');
 const uuid = require('uuid/v4');
@@ -61,6 +63,9 @@ module.exports.globeePayment = async (e) => {
     const reqData = JSON.parse(e.body);
 
     // check requested ticket # against inventory
+    // create request to globee
+    // ==> FAIL: Send response to client to try again
+    // create inventory placeholder as expiration date string (from response)
     // 
 
     /**
@@ -106,4 +111,11 @@ module.exports.globeePayment = async (e) => {
             success_url: 'http://success.to.here',
         }),
     };
+};
+
+module.exports.globeeInstantPaymentNotification = async e => {
+    const data = JSON.parse(e.body);
+
+    // finalize inventory and create attendee
+    return { statusCode: 200 };
 };

@@ -1,7 +1,7 @@
 const aws = require('aws-sdk');
 const RequestItems = require('./CryptoCon.json');
 
-const dynamo = new aws.DynamoDB.DocumentClient();
+const dynamo = new aws.DynamoDB();
 
 const responseStatus = {
     success: 'SUCCESS',
@@ -22,7 +22,7 @@ module.exports.handler = async (e, ctx) => {
         RequestItems,
     };
 
-    return dynamo.batchWrite(params).promise()
+    return dynamo.batchWriteItem(params).promise()
         .then(data => {
             console.log(`Successfully seeded the CryptoCon table with ${data}`);
             return generateResponse(e, ctx, responseStatus.success);

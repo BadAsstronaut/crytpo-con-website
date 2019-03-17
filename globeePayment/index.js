@@ -14,6 +14,7 @@ const {
     GLOBEE_CURRENCY,
     GLOBEE_SUCCESS_URL,
     GLOBEE_URL,
+    GLOBEE_WEBHOOK_URL,
 } = process.env;
 
 const appErrorResponse = {
@@ -36,7 +37,7 @@ const createGlobeePayment = (payment) => {
 
     const reqOptions = {
         method: 'POST',
-        uri: `https://${GLOBEE_URL}/payment-api/v1/payment-request`,
+        uri: `${GLOBEE_URL}payment-request`,
         headers,
         json: true,
         body: {
@@ -78,6 +79,7 @@ const queryTier = (tier) => {
 const putTransactionPlaceholder = (globeeResponse, tierInfo, attendees) => {
     // create attendee records here and add to attendees on success! :D
     const globeeData = globeeResponse.data;
+    const mapAttendeeFn = createAttendee(tierInfo.inventory.current, tierInfo.partitionKey);
     const transactionObject = {
         PartionKey: tierInfo.partitionKey,
         SortKey: 'transactions',
@@ -88,7 +90,7 @@ const putTransactionPlaceholder = (globeeResponse, tierInfo, attendees) => {
         Currency: globeeData.currency,
         Customer: globeeData.customer,
         ExpiresAt: globeeData.expiresAt,
-        Attendees: attendees.map(createAttendee),
+        Attendees: attendees.map(mapAttendeeFn),
     };
 
     const inventoryHolds = attendees
@@ -119,8 +121,8 @@ const remapTier = tierData => {
     const partitionKey = tierData.Items[0].PartitionKey;
     const tier = partitionKey.split('_')[1]
     const inventory = {
-        initial = extractElementBySortKey(tierData, 'inventory').Total,
-        current = remainingInventory(tierData),
+        initial: extractElementBySortKey(tierData.Items, 'inventory').Total,
+        current: remainingInventory(tierData.Items),
     };
 
     const price = getCurrentPrice(tierData.Items);
@@ -160,7 +162,7 @@ const extractElementBySortKey = (items, keyVal) => {
 
 const remainingInventory = (tierItems) => {
     // TODO: Refactor to use reformatted document
-    const allocated = 0;
+    let allocated = 0;
     const startingInventory = (tierItems
         .find(i => i.SortKey === 'inventory'))
         .Total;
@@ -235,7 +237,7 @@ module.exports.globeePayment = async (e) => {
         return badRequestResponse(`No ticket information was found for ${tier}`);
     }
 
-    if (!validInventory(rawTierData.Items, attendees.length)) {
+    if (!(remainingInventory(rawTierData.Items) >= attendees.length)) {
         return badRequestResponse(`No inventory for ${tier} available`);
     }
 
@@ -271,7 +273,7 @@ module.exports.globeePayment = async (e) => {
     };
 };
 
-module.exports.globeeInstantPaymentNotification = async e => {
+module.exports.globeePaymentWebhook = async e => {
     const data = JSON.parse(e.body);
     console.log(e.body);
     // finalize inventory and create attendee

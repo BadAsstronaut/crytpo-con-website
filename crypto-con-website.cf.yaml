@@ -89,6 +89,16 @@ Resources:
       Role: !GetAtt LambdaRole.Arn
       Runtime: nodejs8.10
 
+  GlobeeWebhookFunction:
+    Type: AWS::Lambda::Function
+    Properties:
+      Code:
+        S3Bucket: !Ref S3Bucket
+        S3Key: !Ref S3GlobeePaymentKey
+      Handler: index.globeePaymentWebhook
+      Role: !GetAtt LambdaRole.Arn
+      Runtime: nodejs8.10
+
   GlobeePaymentPermission:
     Type: AWS::Lambda::Permission
     Properties:
@@ -151,6 +161,25 @@ Resources:
         Type: AWS_PROXY
         IntegrationHttpMethod: POST
         Uri: !Sub arn:aws:apigateway:${AWS::Region}:lambda:path/2015-03-31/functions/${GlobeePaymentFunction.Arn}/invocations
+
+  GlobeePaymentWebhookResource:
+    Type: AWS::ApiGateway::Resource
+    Properties:
+      ParentId: !Ref GlobeePaymentResource
+      PathPart: ipn-webhook
+      RestApiId: !Ref RestApi
+
+  GlobeePaymentWebhookMethod:
+    Type: AWS::ApiGateway::Method
+    Properties:
+      ResourceId: !Ref GlobeePaymentWebhookResource
+      RestApiId: !Ref RestApi
+      HttpMethod: POST
+      AuthorizationType: NONE
+      Integration:
+        Type: AWS_PROXY
+        IntegrationHttpMethod: POST
+        Uri: !Sub arn:aws:apigateway:${AWS::Region}:lambda:path/2015-03-31/functions/${GlobeeWebhookFunction.Arn}/invocations
 
   # Custom
   InitTable:

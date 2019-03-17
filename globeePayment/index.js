@@ -1,7 +1,7 @@
 'use strict';
 
 require('dotenv').config();
-
+const crypto = require('crypto');
 const aws = require('aws-sdk');
 const requester = require('request-promise-native');
 const uuid = require('uuid/v4');
@@ -9,13 +9,25 @@ const uuid = require('uuid/v4');
 const dynamoClient = new aws.DynamoDB.DocumentClient();
 
 const {
-    GLOBEE_URL,
+    DYNAMO_TABLE,
     GLOBEE_AUTH,
     GLOBEE_CURRENCY,
     GLOBEE_SUCCESS_URL,
+    GLOBEE_URL,
 } = process.env;
 
-const createGlobeePayment = (paymentDetails) => {
+const appErrorResponse = {
+    statusCode: 500,
+    body: 'Internal application error',
+};
+
+const badRequestResponse = (message) => ({
+    statusCode: 400,
+    body: message || 'Bad Request',
+});
+
+// External APIs
+const createGlobeePayment = (payment) => {
     const headers = {
         Accept: 'application/json',
         'Content-Type': 'application/json',
@@ -28,12 +40,12 @@ const createGlobeePayment = (paymentDetails) => {
         headers,
         json: true,
         body: {
-            total: paymentDetails.total,
+            total: payment.total,
             currency: GLOBEE_CURRENCY || 'USD',
             custom_store_reference: 'Monero Crypto Conference',
             customer: {
-                name: paymentDetails.name,
-                email: paymentDetails.email,
+                name: payment.name,
+                email: payment.email,
             },
             success_url: GLOBEE_SUCCESS_URL,
             ipn_url: GLOBEE_WEBHOOK_URL,
@@ -50,72 +62,223 @@ const createGlobeePayment = (paymentDetails) => {
         .catch(err => { throw err; });
 };
 
-const createTransaction = (transactionData) => {
-    const params = {
-        table: 'CryptoCon',
-        item: {
 
+// Dynamo-mite! (aka dynamo queries)
+const queryTier = (tier) => {
+    const params = {
+        TableName: DYNAMO_TABLE,
+        KeyConditionExpression: 'PartitionKey = :partitionKey',
+        ExpressionAttributeValues: { ':partitionKey': `ticketTier_${tier}` },
+    };
+
+    return dynamoClient.query(params).promise()
+        .catch(err => { throw err; });
+};
+
+const putTransactionPlaceholder = (globeeResponse, tierInfo, attendees) => {
+    // create attendee records here and add to attendees on success! :D
+    const globeeData = globeeResponse.data;
+    const transactionObject = {
+        PartionKey: tierInfo.partitionKey,
+        SortKey: 'transactions',
+        PaymentId: globeeData.id,
+        PaymentType: 'globee',
+        Status: globeeData.status,
+        Amount: globeeData.total,
+        Currency: globeeData.currency,
+        Customer: globeeData.customer,
+        ExpiresAt: globeeData.expiresAt,
+        Attendees: attendees.map(createAttendee),
+    };
+
+    const inventoryHolds = attendees
+        .map((i, idx) => {
+            return {
+                PartionKey: tierInfo.PartionKey,
+                SortKey: `inventoryHold${uuid()}`,
+                TTL: Date.parse(globeeData.expiresAt),
+            }
+        });
+
+    const putRequests = inventoryHolds
+        .map(i => ({ PutRequest: { Item: i } })
+            .concat([{ PutRequest: { Item: transactionObject } }]));
+
+
+    const params = {
+        RequestItems: {
+            [DYNAMO_TABLE]: putRequests,
         },
+    };
+
+    dynamoClient.batchWrite(params);
+};
+
+// utility functions
+const remapTier = tierData => {
+    const partitionKey = tierData.Items[0].PartitionKey;
+    const tier = partitionKey.split('_')[1]
+    const inventory = {
+        initial = extractElementBySortKey(tierData, 'inventory').Total,
+        current = remainingInventory(tierData),
+    };
+
+    const price = getCurrentPrice(tierData.Items);
+    const transactions = extractElementBySortKey(tierData.Items, 'transactions');
+    const attendees = extractElementBySortKey(tierData.Items, 'attendees');
+
+    return {
+        partitionKey,
+        tier,
+        inventory,
+        price,
+        transactions,
+        attendees,
+    };
+};
+
+const createHash = (raw) => {
+    return crypto
+        .createHash('sha256')
+        .update(raw)
+        .digest('hex');
+};
+
+const createAttendee = (inventory, partitionKey) => (attendee, idx) => {
+    // attendee hash = H(ticket-tier + name + institution + ticket number)
+    return {
+        name: attendee.name,
+        institution: attendee.institution,
+        identifier: createHash(`${partitionKey}${attendee.name}${attendee.institution}${inventory - idx}`),
+    };
+};
+
+const extractElementBySortKey = (items, keyVal) => {
+    return items
+        .find(i => i.SortKey === keyVal);
+};
+
+const remainingInventory = (tierItems) => {
+    // TODO: Refactor to use reformatted document
+    const allocated = 0;
+    const startingInventory = (tierItems
+        .find(i => i.SortKey === 'inventory'))
+        .Total;
+    const attendees = tierItems.find(i => i.SortKey === 'attendees');
+
+    if (attendees && Array.isArray(attendees)) {
+        allocated += attendees.length;
+    }
+
+    allocated += tierItems
+        .filter(i => i.SortKey.startsWith('inventoryHold'))
+        .length;
+
+    return startingInventory - allocated;
+};
+
+const getCurrentPrice = (tierItems) => {
+    return Math.min(
+        (tierItems
+            .find(i => i.SortKey === 'price'))
+            .PricingMap
+            .ByDate
+            .filter(i => {
+                return Date.parse(i.EndDate) >= Date.now();
+            })
+            .map(i => i.Price));
+};
+
+const paymentDetails = (tierItems, name, email, numTickets) => {
+    const ticketPrice = getCurrentPrice(tierItems);
+    const total = ticketPrice * numTickets;
+
+    return {
+        total,
+        name,
+        email,
     };
 };
 
 module.exports.globeePayment = async (e) => {
-    const reqData = JSON.parse(e.body);
-
-    // check requested ticket # against inventory
-    // create request to globee
-    // ==> FAIL: Send response to client to try again
-    // create inventory placeholder as expiration date string (from response)
-    // 
-
     /**
      * Input schema:
      * - purchaserName
      * - purchaserEmail
-     * - tier
-     * - [{
+     * - tier general|student|platinum
+     * - attendees: [{
      *      name,
      *      institution?,
      *    }]
      */
 
-    const attendeeParams = {
-        Item: {
-            PartitionKey: uuid(),
-            TicketTier: reqData.tier,
-            Name: reqData.name,
-            Email: reqData.email,
-            PurchaseVerification: null,
-        },
-        TableName: 'CryptoCon',
-    };
+    const {
+        purchaserName,
+        purchaserEmail,
+        tier,
+        attendees,
+    } = JSON.parse(e.body);
 
-    const purchaseParams = {
+    if (tier === 'student' && !purchaserEmail.endsWith('.edu')) {
+        return badRequestResponse(`Requires .edu email to purchase student tickets`);
+    }
 
-    };
+    let rawTierData;
+    try {
+        rawTierData = await queryTier(tier);
+    } catch (err) {
+        console.error(`Error retrieving tier data: ${err.message}`, err);
+        return appErrorResponse;
+    }
 
+    if (!(rawTierData.Items && rawTierData.Items.length)) {
+        return badRequestResponse(`No ticket information was found for ${tier}`);
+    }
 
-    // Create an attendee
-    // .edu email address for student pricing!
-    // Create a purchase
-    // initial ticket availablity: 50 student, 200 general, 50 platinum
-    // attendee hash = H(ticket-tier + name + institution + ticket number)
+    if (!validInventory(rawTierData.Items, attendees.length)) {
+        return badRequestResponse(`No inventory for ${tier} available`);
+    }
+
+    const tierInfo = remapTier(rawTierData);
+
+    const paymentInfo = paymentDetails(
+        rawTierData.Items,
+        purchaserName,
+        purchaserEmail,
+        attendees.length
+    );
+
+    let globeeResponse;
+    try {
+        globeeResponse = await createGlobeePayment(paymentInfo);
+    } catch (err) {
+        console.error(`Error creating Globee request: ${err.message}`, err);
+        return appErrorResponse;
+    }
+
+    let transactionInfo;
+    try {
+        transactionInfo = await putTransactionPlaceholder(globeeResponse, tierInfo, attendees)
+    } catch (err) {
+        return appErrorResponse;
+    }
+
     return {
-        statusCode: 201,
-        headers: {
-            'x-custom-test': 'Test header'
-        },
+        statusCode: 200,
         body: JSON.stringify({
-            status: 'good',
-            redirect_url: 'http://redirect.to.here',
-            success_url: 'http://success.to.here',
+            redirectUrl: globeeResponse.data.redirect_url,
         }),
     };
 };
 
 module.exports.globeeInstantPaymentNotification = async e => {
     const data = JSON.parse(e.body);
-
+    console.log(e.body);
     // finalize inventory and create attendee
     return { statusCode: 200 };
 };
+
+module.exports.globeePendingTimeout = async e => {
+    // https://aws.amazon.com/blogs/database/automatically-archive-items-to-s3-using-dynamodb-time-to-live-with-aws-lambda-and-amazon-kinesis-firehose/
+};
+

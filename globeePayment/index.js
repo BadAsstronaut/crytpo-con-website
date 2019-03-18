@@ -39,8 +39,7 @@ const createGlobeePayment = (payment) => {
         method: 'POST',
         uri: `${GLOBEE_URL}payment-request`,
         headers,
-        json: true,
-        body: {
+        body: JSON.stringify({
             total: payment.total,
             currency: GLOBEE_CURRENCY || 'USD',
             custom_store_reference: 'Monero Crypto Conference',
@@ -50,16 +49,19 @@ const createGlobeePayment = (payment) => {
             },
             success_url: GLOBEE_SUCCESS_URL,
             ipn_url: GLOBEE_WEBHOOK_URL,
-        },
+        }),
     };
 
     return requester(reqOptions)
-        .then(data => ({
-            id: data.id,
-            customer: data.customer,
-            redirectUrl: data.redirect_url,
-            expiresAt: data.expires_at,
-        }))
+        .then(response => {
+            const parsed = JSON.parse(response);
+            return {
+                id: parsed.data.id,
+                customer: parsed.data.customer,
+                redirectUrl: parsed.data.redirect_url,
+                expiresAt: parsed.data.expires_at,
+            };
+        })
         .catch(err => { throw err; });
 };
 
@@ -78,34 +80,32 @@ const queryTier = (tier) => {
 
 const putTransactionPlaceholder = (globeeResponse, tierInfo, attendees) => {
     // create attendee records here and add to attendees on success! :D
-    const globeeData = globeeResponse.data;
     const mapAttendeeFn = createAttendee(tierInfo.inventory.current, tierInfo.partitionKey);
     const transactionObject = {
-        PartionKey: tierInfo.partitionKey,
-        SortKey: 'transactions',
-        PaymentId: globeeData.id,
+        PartitionKey: tierInfo.partitionKey,
+        SortKey: `transactions${globeeResponse.id}`,
         PaymentType: 'globee',
-        Status: globeeData.status,
-        Amount: globeeData.total,
-        Currency: globeeData.currency,
-        Customer: globeeData.customer,
-        ExpiresAt: globeeData.expiresAt,
+        Status: globeeResponse.status,
+        Amount: globeeResponse.total,
+        Currency: globeeResponse.currency,
+        Customer: globeeResponse.customer,
+        ExpiresAt: globeeResponse.expiresAt,
         Attendees: attendees.map(mapAttendeeFn),
     };
 
     const inventoryHolds = attendees
-        .map((i, idx) => {
+        .map(() => {
+            const ttl = Math.floor(Date.parse(globeeResponse.expiresAt) / 1000);
             return {
-                PartionKey: tierInfo.PartionKey,
+                PartitionKey: tierInfo.partitionKey,
                 SortKey: `inventoryHold${uuid()}`,
-                TTL: Date.parse(globeeData.expiresAt),
-            }
+                TTL: ttl,
+            };
         });
 
     const putRequests = inventoryHolds
-        .map(i => ({ PutRequest: { Item: i } })
-            .concat([{ PutRequest: { Item: transactionObject } }]));
-
+        .map(i => ({ PutRequest: { Item: i } }))
+        .concat([{ PutRequest: { Item: transactionObject } }]);
 
     const params = {
         RequestItems: {
@@ -113,7 +113,16 @@ const putTransactionPlaceholder = (globeeResponse, tierInfo, attendees) => {
         },
     };
 
-    dynamoClient.batchWrite(params);
+    console.log(JSON.stringify(params));
+
+    return dynamoClient.batchWrite(params).promise()
+        .then(() => {
+            console.log(`Globee transaction created with payment ID ${globeeResponse.id}`);
+        })
+        .catch(err => {
+            console.error(JSON.stringify(err));
+            throw err;
+        });
 };
 
 // utility functions
@@ -180,15 +189,12 @@ const remainingInventory = (tierItems) => {
 };
 
 const getCurrentPrice = (tierItems) => {
-    return Math.min(
-        (tierItems
-            .find(i => i.SortKey === 'price'))
-            .PricingMap
-            .ByDate
-            .filter(i => {
-                return Date.parse(i.EndDate) >= Date.now();
-            })
-            .map(i => i.Price));
+    const priceItem = tierItems.find(i => i.SortKey === 'price');
+    const price = Math.min(...priceItem.PricingMap.ByDate
+        .filter(i => (Date.parse(i.EndDate) >= Date.now()))
+        .map(i => i.Price));
+
+    return price;
 };
 
 const paymentDetails = (tierItems, name, email, numTickets) => {
@@ -268,7 +274,7 @@ module.exports.globeePayment = async (e) => {
     return {
         statusCode: 200,
         body: JSON.stringify({
-            redirectUrl: globeeResponse.data.redirect_url,
+            redirectUrl: globeeResponse.redirectUrl,
         }),
     };
 };

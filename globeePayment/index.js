@@ -4,7 +4,6 @@ require('dotenv').config();
 const crypto = require('crypto');
 const aws = require('aws-sdk');
 const requester = require('request-promise-native');
-const uuid = require('uuid/v4');
 
 const dynamoClient = new aws.DynamoDB.DocumentClient();
 
@@ -16,6 +15,16 @@ const {
     GLOBEE_URL,
     GLOBEE_WEBHOOK_URL,
 } = process.env;
+
+const sortKeys = {
+    prefixes: {
+        transaction: 'transaction_',
+        inventoryHold: 'inventoryHold_',
+    },
+    attendees: 'attendees',
+    inventory: 'inventory',
+    price: 'price',
+};
 
 const appErrorResponse = {
     statusCode: 500,
@@ -47,6 +56,7 @@ const createGlobeePayment = (payment) => {
                 name: payment.name,
                 email: payment.email,
             },
+            callback_data: `${payment.partitionKey}|${payment.numTickets}`,
             success_url: GLOBEE_SUCCESS_URL,
             ipn_url: GLOBEE_WEBHOOK_URL,
         }),
@@ -67,11 +77,12 @@ const createGlobeePayment = (payment) => {
 
 
 // Dynamo-mite! (aka dynamo queries)
-const queryTier = (tier) => {
+const queryPartition = (pk) => {
+    // TODO: Make a query generator
     const params = {
         TableName: DYNAMO_TABLE,
         KeyConditionExpression: 'PartitionKey = :partitionKey',
-        ExpressionAttributeValues: { ':partitionKey': `ticketTier_${tier}` },
+        ExpressionAttributeValues: { ':partitionKey': pk },
     };
 
     return dynamoClient.query(params).promise()
@@ -80,25 +91,27 @@ const queryTier = (tier) => {
 
 const putTransactionPlaceholder = (globeeResponse, tierInfo, attendees) => {
     // create attendee records here and add to attendees on success! :D
-    const mapAttendeeFn = createAttendee(tierInfo.inventory.current, tierInfo.partitionKey);
+    const mapAttendeeFn = createUnconfirmedAttendee(tierInfo.inventory.current, tierInfo.partitionKey);
+    const attendeeRecords = attendees.map(mapAttendeeFn);
+
     const transactionObject = {
         PartitionKey: tierInfo.partitionKey,
-        SortKey: `transactions${globeeResponse.id}`,
+        SortKey: `${sortKeys.prefixes.transaction}${globeeResponse.id}`,
         PaymentType: 'globee',
-        Status: globeeResponse.status,
+        Status: globeeResponse.status || 'Pending',
         Amount: globeeResponse.total,
         Currency: globeeResponse.currency,
         Customer: globeeResponse.customer,
         ExpiresAt: globeeResponse.expiresAt,
-        Attendees: attendees.map(mapAttendeeFn),
+        Attendees: attendeeRecords,
     };
 
-    const inventoryHolds = attendees
-        .map(() => {
+    const inventoryHolds = attendeeRecords
+        .map((i, idx) => {
             const ttl = Math.floor(Date.parse(globeeResponse.expiresAt) / 1000);
             return {
                 PartitionKey: tierInfo.partitionKey,
-                SortKey: `inventoryHold${uuid()}`,
+                SortKey: `${sortKeys.prefixes.inventoryHold}${globeeResponse.id}_${idx}`,
                 TTL: ttl,
             };
         });
@@ -125,26 +138,86 @@ const putTransactionPlaceholder = (globeeResponse, tierInfo, attendees) => {
         });
 };
 
+
+const updateTransaction = async (updateData) => {
+    const {
+        id,
+        status,
+        callback_data: ticketInfo,
+    } = updateData;
+
+    const { partitionKey, numTickets } = parsePartitionTickets(ticketInfo, 10);
+    const tierData = await queryPartition(partitionKey);
+
+    const transaction = extractElementBySortKey(tierData.Items, `${sortKeys.prefixes.transaction}${id}`);
+    transaction.status = status;
+
+    console.log(`transaction: ${JSON.stringify(transaction)}`);
+
+    const deleteRequests = [...Array(numTickets).keys()].map((i, idx) => ({
+        DeleteRequest: {
+            Key: {
+                PartitionKey: partitionKey,
+                SortKey: `${sortKeys.prefixes.inventoryHold}${id}_${idx}`
+            },
+        }
+    }));
+
+    const putRequests = [transaction];
+
+    const batchParams = {
+        RequestItems: {
+            [DYNAMO_TABLE]: deleteRequests.concat(putRequests)
+        }
+    };
+
+    console.log(`Batch params: ${JSON.stringify(batchParams)}`);
+
+    const updateParams = {
+        TableName: DYNAMO_TABLE,
+        Key: { PartitionKey: partitionKey, SortKey: sortKeys.attendees },
+        UpdateExpression: `SET AttendeeList = list_append(AttendeeList, :newAttendees)`,
+        ExpressionAttributeValues: {
+            ':newAttendees': transaction.Attendees,
+        },
+    };
+
+    console.log(`updateParams: ${JSON.stringify(updateParams)}`);
+
+
+    return Promise.all([
+        dynamoClient.batchWrite(batchParams).promise(),
+        dynamoClient.update(updateParams).promise(),
+    ]);
+};
+
 // utility functions
 const remapTier = tierData => {
     const partitionKey = tierData.Items[0].PartitionKey;
     const tier = partitionKey.split('_')[1]
     const inventory = {
-        initial: extractElementBySortKey(tierData.Items, 'inventory').Total,
+        initial: extractElementBySortKey(tierData.Items, sortKeys.inventory).Total,
         current: remainingInventory(tierData.Items),
     };
 
     const price = getCurrentPrice(tierData.Items);
-    const transactions = extractElementBySortKey(tierData.Items, 'transactions');
-    const attendees = extractElementBySortKey(tierData.Items, 'attendees');
+    const attendees = extractElementBySortKey(tierData.Items, sortKeys.attendees);
 
     return {
         partitionKey,
         tier,
         inventory,
         price,
-        transactions,
         attendees,
+    };
+};
+
+const parsePartitionTickets = (numTicketsString) => {
+    const parts = numTicketsString.split('|');
+
+    return {
+        partitionKey: parts[0],
+        numTickets: parseInt(parts[1], 10),
     };
 };
 
@@ -155,7 +228,7 @@ const createHash = (raw) => {
         .digest('hex');
 };
 
-const createAttendee = (inventory, partitionKey) => (attendee, idx) => {
+const createUnconfirmedAttendee = (inventory, partitionKey) => (attendee, idx) => {
     // attendee hash = H(ticket-tier + name + institution + ticket number)
     return {
         name: attendee.name,
@@ -190,14 +263,17 @@ const remainingInventory = (tierItems) => {
 
 const getCurrentPrice = (tierItems) => {
     const priceItem = tierItems.find(i => i.SortKey === 'price');
-    const price = Math.min(...priceItem.PricingMap.ByDate
-        .filter(i => (Date.parse(i.EndDate) >= Date.now()))
-        .map(i => i.Price));
+    const price = Math.min(
+        ...priceItem.PricingMap.ByDate
+            .filter(i => (Date.parse(i.EndDate) >= Date.now()))
+            .map(i => i.Price)
+    );
 
     return price;
 };
 
 const paymentDetails = (tierItems, name, email, numTickets) => {
+    const partitionKey = tierItems[0].PartitionKey;
     const ticketPrice = getCurrentPrice(tierItems);
     const total = ticketPrice * numTickets;
 
@@ -205,6 +281,8 @@ const paymentDetails = (tierItems, name, email, numTickets) => {
         total,
         name,
         email,
+        numTickets,
+        partitionKey,
     };
 };
 
@@ -233,7 +311,7 @@ module.exports.globeePayment = async (e) => {
 
     let rawTierData;
     try {
-        rawTierData = await queryTier(tier);
+        rawTierData = await queryPartition(`ticketTier_${tier}`);
     } catch (err) {
         console.error(`Error retrieving tier data: ${err.message}`, err);
         return appErrorResponse;
@@ -264,29 +342,32 @@ module.exports.globeePayment = async (e) => {
         return appErrorResponse;
     }
 
-    let transactionInfo;
-    try {
-        transactionInfo = await putTransactionPlaceholder(globeeResponse, tierInfo, attendees)
-    } catch (err) {
-        return appErrorResponse;
-    }
-
-    return {
-        statusCode: 200,
-        body: JSON.stringify({
-            redirectUrl: globeeResponse.redirectUrl,
-        }),
-    };
+    return putTransactionPlaceholder(globeeResponse, tierInfo, attendees)
+        .then(() => ({
+            statusCode: 201,
+            body: JSON.stringify({
+                redirectUrl: globeeResponse.redirectUrl,
+            })
+        }))
+        .catch(err => {
+            console.log(`Error saving transaction: ${err.message}`);
+        });
 };
 
 module.exports.globeePaymentWebhook = async e => {
-    const data = JSON.parse(e.body);
-    console.log(e.body);
-    // finalize inventory and create attendee
-    return { statusCode: 200 };
+    const request = JSON.parse(e.body);
+    return updateTransaction(request)
+        .then(() => ({ statusCode: 200 }))
+        .catch(err => {
+            console.log(`Error occurred during instant payment notification callback: ${err.message}`);
+            return {
+                statusCode: 500,
+            };
+        });
 };
 
 module.exports.globeePendingTimeout = async e => {
     // https://aws.amazon.com/blogs/database/automatically-archive-items-to-s3-using-dynamodb-time-to-live-with-aws-lambda-and-amazon-kinesis-firehose/
 };
+
 

@@ -59,6 +59,21 @@
       "PutRequest": {
         "Item": {
           "PartitionKey": {
+            "S": "ticketTier_general"
+          },
+          "SortKey": {
+            "S": "attendees"
+          },
+          "AttendeeList": {
+            "L": []
+          }
+        }
+      }
+    },
+    {
+      "PutRequest": {
+        "Item": {
+          "PartitionKey": {
             "S": "ticketTier_student"
           },
           "SortKey": {
@@ -114,6 +129,21 @@
       "PutRequest": {
         "Item": {
           "PartitionKey": {
+            "S": "ticketTier_student"
+          },
+          "SortKey": {
+            "S": "attendees"
+          },
+          "AttendeeList": {
+            "L": []
+          }
+        }
+      }
+    },
+    {
+      "PutRequest": {
+        "Item": {
+          "PartitionKey": {
             "S": "ticketTier_platinum"
           },
           "SortKey": {
@@ -161,6 +191,21 @@
                 ]
               }
             }
+          }
+        }
+      }
+    },
+    {
+      "PutRequest": {
+        "Item": {
+          "PartitionKey": {
+            "S": "ticketTier_platinum"
+          },
+          "SortKey": {
+            "S": "attendees"
+          },
+          "AttendeeList": {
+            "L": []
           }
         }
       }

@@ -107,6 +107,14 @@ Resources:
       Principal: apigateway.amazonaws.com
       SourceArn: !Sub arn:aws:execute-api:${AWS::Region}:${AWS::AccountId}:${RestApi}/*/*/globee-payment
 
+  GlobeeWebhookPermission:
+    Type: AWS::Lambda::Permission
+    Properties:
+      Action: lambda:invokeFunction
+      FunctionName: !GetAtt GlobeeWebhookFunction.Arn
+      Principal: apigateway.amazonaws.com
+      SourceArn: !Sub arn:aws:execute-api:${AWS::Region}:${AWS::AccountId}:${RestApi}/*/*/globee-payment/ipn-webhook
+
   # API Gateway API, Resources, and Methods
   RestApi:
     Type: AWS::ApiGateway::RestApi

@@ -1,6 +1,7 @@
 'use strict';
 
 require('dotenv').config();
+
 const crypto = require('crypto');
 const aws = require('aws-sdk');
 const requester = require('request-promise-native');
@@ -67,9 +68,13 @@ const createGlobeePayment = (payment) => {
             const parsed = JSON.parse(response);
             return {
                 id: parsed.data.id,
+                status: parsed.data.status,
+                total: parsed.data.total,
+                currency: parsed.data.currency,
                 customer: parsed.data.customer,
                 redirectUrl: parsed.data.redirect_url,
                 expiresAt: parsed.data.expires_at,
+
             };
         })
         .catch(err => { throw err; });
@@ -94,11 +99,13 @@ const putTransactionPlaceholder = (globeeResponse, tierInfo, attendees) => {
     const mapAttendeeFn = createUnconfirmedAttendee(tierInfo.inventory.current, tierInfo.partitionKey);
     const attendeeRecords = attendees.map(mapAttendeeFn);
 
+    console.log(JSON.stringify(globeeResponse));
+
     const transactionObject = {
         PartitionKey: tierInfo.partitionKey,
         SortKey: `${sortKeys.prefixes.transaction}${globeeResponse.id}`,
         PaymentType: 'globee',
-        Status: globeeResponse.status || 'Pending',
+        Status: [{ status: globeeResponse.status, date: isoDate() }],
         Amount: globeeResponse.total,
         Currency: globeeResponse.currency,
         Customer: globeeResponse.customer,
@@ -138,7 +145,6 @@ const putTransactionPlaceholder = (globeeResponse, tierInfo, attendees) => {
         });
 };
 
-
 const updateTransaction = async (updateData) => {
     const {
         id,
@@ -150,7 +156,7 @@ const updateTransaction = async (updateData) => {
     const tierData = await queryPartition(partitionKey);
 
     const transaction = extractElementBySortKey(tierData.Items, `${sortKeys.prefixes.transaction}${id}`);
-    transaction.status = status;
+    transaction.Status.push({ status, date: isoDate() });
 
     console.log(`transaction: ${JSON.stringify(transaction)}`);
 
@@ -163,32 +169,40 @@ const updateTransaction = async (updateData) => {
         }
     }));
 
-    const putRequests = [transaction];
+    const putRequests = [{ PutRequest: { Item: transaction } }];
+
+    // only delete placeholder items on 'paid' status
+    const requestItems = status === 'paid'
+        ? putRequests.concat(deleteRequests)
+        : putRequests;
 
     const batchParams = {
         RequestItems: {
-            [DYNAMO_TABLE]: deleteRequests.concat(putRequests)
+            [DYNAMO_TABLE]: requestItems,
         }
     };
 
     console.log(`Batch params: ${JSON.stringify(batchParams)}`);
 
-    const updateParams = {
-        TableName: DYNAMO_TABLE,
-        Key: { PartitionKey: partitionKey, SortKey: sortKeys.attendees },
-        UpdateExpression: `SET AttendeeList = list_append(AttendeeList, :newAttendees)`,
-        ExpressionAttributeValues: {
-            ':newAttendees': transaction.Attendees,
-        },
-    };
-
-    console.log(`updateParams: ${JSON.stringify(updateParams)}`);
-
-
-    return Promise.all([
+    const promises = [
         dynamoClient.batchWrite(batchParams).promise(),
-        dynamoClient.update(updateParams).promise(),
-    ]);
+    ];
+
+    if (status === 'paid') {
+        const updateParams = {
+            TableName: DYNAMO_TABLE,
+            Key: { PartitionKey: partitionKey, SortKey: sortKeys.attendees },
+            UpdateExpression: `SET AttendeeList = list_append(AttendeeList, :newAttendees)`,
+            ExpressionAttributeValues: {
+                ':newAttendees': transaction.Attendees,
+            },
+        };
+
+        console.log(`updateParams: ${JSON.stringify(updateParams)}`);
+        promises.push(dynamoClient.update(updateParams).promise());
+    }
+
+    return Promise.all(promises);
 };
 
 // utility functions
@@ -270,6 +284,10 @@ const getCurrentPrice = (tierItems) => {
     );
 
     return price;
+};
+
+const isoDate = () => {
+    return new Date().toISOString();
 };
 
 const paymentDetails = (tierItems, name, email, numTickets) => {

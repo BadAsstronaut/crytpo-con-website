@@ -40,10 +40,10 @@
       const formControls = {
         purchaserName: document.getElementById('ticket-purchaser-name'),
         purchaserEmail: document.getElementById('ticket-purchaser-email'),
-        tierOptions: document.querySelectorAll('input[name="ticketTier"]'),
+        tierOptions: document.querySelectorAll('input[name="ticket-tier"]'),
         numTickets: document.getElementById('num-tickets'),
         paymentType: document.getElementById('payment-type'),
-        submit: document.getElementbyId('submit-payment'),
+        submit: document.getElementById('submit-payment'),
       };
 
       formControls.numTickets.addEventListener('change', e => {
@@ -51,13 +51,13 @@
         const numAttendees = parseInt(e.target.value || 0, 10);
         const target = document.getElementById('attendee-data');
         const elems = [...Array(numAttendees).keys()].map((el, idx) => (`
-        <div class="form-item field required">
-          <label for="attendeeName-${idx + 1}">Attendee ${idx + 1} Name<span class="required">*</span></label>
-          <input id="attendeeName-${idx + 1}" name="attendeeName" type="text" spellcheck="false" class="field-element" />
-          <label for="attendeeInstitution-${idx + 1}">Attendee ${idx + 1} Institution</label>
-          <input id="attendeeInstitution-${idx + 1}" Institution="attendeeInstitution-${idx}" type="text" spellcheck="false" class="field-element" />
-        </div>
-      `));
+<div class="form-item field required">
+<label for="attendeeName-${idx + 1}">Attendee ${idx + 1} Name<span class="required">*</span></label>
+<input id="attendeeName-${idx + 1}" name="attendeeName" type="text" spellcheck="false" class="field-element" />
+<label for="attendeeInstitution-${idx + 1}">Attendee ${idx + 1} Institution</label>
+<input id="attendeeInstitution-${idx + 1}" Institution="attendeeInstitution-${idx}" type="text" spellcheck="false" class="field-element" />
+</div>
+`));
         target.innerHTML = elems.join('');
       });
 
@@ -72,14 +72,18 @@
           errs.push('Email');
         }
 
-        if (![...formControls.tierOptions].filter(el => el.checked).length === 1) {
+        if (!([...formControls.tierOptions].filter(el => el.checked).length === 1)) {
           errs.push('Ticket Tier');
         }
 
         const attendeeNameInputs = document.querySelectorAll('input[name="attendeeName"]');
 
-        if ([...attendeeNameInputs].filter(el => !el.value) > 0) {
+        if ([...attendeeNameInputs].filter(el => !el.value).length > 0) {
           errs.push('Attendee Name(s)');
+        }
+
+        if (!formControls.paymentType.value) {
+          errs.push('Payment Type');
         }
 
         if (formControls.paymentType.value === 'stripe') {
@@ -100,7 +104,7 @@
         const payload = {
           purchaserName: formControls.purchaserName.value,
           purchaserEmail: formControls.purchaserEmail.value,
-          tier: [...formControls.tierOptions].filter(el => el.checked).value,
+          tier: [...formControls.tierOptions].filter(el => el.checked)[0].value,
           attendees,
         };
 
@@ -114,7 +118,7 @@
             'Content-Type': 'application/json',
           },
         })
-          .then(res => res.data)
+          .then(result => (result.json()))
           .then(result => {
             console.log(result);
             window.location.replace(result.redirectUrl);
@@ -183,7 +187,7 @@
             <div id="attendee-data">
               <div class="form-item field required">
                 <label for="attendeeName-1">Attendee 1 Name<span class="required">*</span></label>
-                <input id="attendeeName-1" name="attendeeName-1" type="text" spellcheck="false" class="field-element" />
+                <input id="attendeeName-1" name="attendeeName" type="text" spellcheck="false" class="field-element" />
                 <label for="attendeeInstitution-1">Attendee 1 Institution</label>
                 <input id="attendeeInstitution-1" Institution="attendeeInstitution-1" type="text" spellcheck="false"
                   class="field-element" />
@@ -195,8 +199,19 @@
               <select id="payment-type" class="field-element">
                 <option value="">- Select an option -</option>
                 <option value="globee">Cryptocurrency (powered by Globee)</option>
-                <option vlaue="stripe">Credit Card (powered by Stripe)</option>
+                <option value="stripe">Credit Card (powered by Stripe)</option>
               </select>
+            </div>
+
+            <div id="credit-card-processing-form" class="hidden">
+              <form action="your-server-side-code" method="POST">
+                <script src="https://checkout.stripe.com/checkout.js" class="stripe-button"
+                  data-key="pk_test_TYooMQauvdEDq54NiTphI7jx" data-amount="999" data-name="Stripe.com"
+                  data-description="Example charge"
+                  data-image="https://stripe.com/img/documentation/checkout/marketplace.png" data-locale="auto"
+                  data-zip-code="true">
+                  </script>
+              </form>
             </div>
 
             <div class="form-button-wrapper form-button-wrapper--align-left">

@@ -29,11 +29,17 @@ const sortKeys = {
 
 const appErrorResponse = {
     statusCode: 500,
+    headers: {
+        'Access-Control-Allow-Origin': '*',
+    },
     body: 'Internal application error',
 };
 
 const badRequestResponse = (message) => ({
     statusCode: 400,
+    headers: {
+        'Access-Control-Allow-Origin': '*',
+    },
     body: message || 'Bad Request',
 });
 
@@ -363,6 +369,9 @@ module.exports.globeePayment = async (e) => {
     return putTransactionPlaceholder(globeeResponse, tierInfo, attendees)
         .then(() => ({
             statusCode: 201,
+            headers: {
+                'Access-Control-Allow-Origin': '*',
+            },
             body: JSON.stringify({
                 redirectUrl: globeeResponse.redirectUrl,
             })
@@ -380,6 +389,9 @@ module.exports.globeePaymentWebhook = async e => {
             console.log(`Error occurred during instant payment notification callback: ${err.message}`);
             return {
                 statusCode: 500,
+                headers: {
+                    'Access-Control-Allow-Origin': '*',
+                },
             };
         });
 };
@@ -388,4 +400,6 @@ module.exports.globeePendingTimeout = async e => {
     // https://aws.amazon.com/blogs/database/automatically-archive-items-to-s3-using-dynamodb-time-to-live-with-aws-lambda-and-amazon-kinesis-firehose/
 };
 
+module.exports.stripePayment = async e => {
 
+};

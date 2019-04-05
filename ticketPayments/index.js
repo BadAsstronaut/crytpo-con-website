@@ -270,8 +270,8 @@ const remainingInventory = (tierItems) => {
         .Total;
     const attendees = tierItems.find(i => i.SortKey === 'attendees');
 
-    if (attendees && Array.isArray(attendees)) {
-        allocated += attendees.length;
+    if (attendees && attendees.AttendeeList && Array.isArray(attendees.AttendeeList)) {
+        allocated += attendees.AttendeeList.length;
     }
 
     allocated += tierItems
@@ -402,4 +402,55 @@ module.exports.globeePendingTimeout = async e => {
 
 module.exports.stripePayment = async e => {
 
+};
+
+module.exports.ticketPricesAndInventory = async e => {
+    const tierMap = {
+        0: 'student',
+        1: 'general',
+        2: 'platinum',
+    };
+
+    return Promise.all([
+        queryPartition('ticketTier_student'),
+        queryPartition('ticketTier_general'),
+        queryPartition('ticketTier_platinum'),
+    ])
+        .then(partitionResults => {
+            return partitionResults
+                .map((part, idx) => {
+                    const result = {
+                        tier: tierMap[idx],
+                        inventory: remainingInventory(part.Items),
+                        price: getCurrentPrice(part.Items),
+                    };
+
+                    console.log(`TicketInfo map result: ${JSON.stringify(result, undefined, 2)}`);
+
+                    return result;
+                })
+                .reduce((obj, el) => {
+                    console.log(`TicketInfo reduce:\nAccumulator: ${JSON.stringify(obj, undefined, 2)}\nElement: ${JSON.stringify(el, undefined, 2)}`)
+                    obj[el.tier] = { inventory: el.inventory, price: el.price };
+                    return obj;
+                }, {});
+        })
+        .then(tierData => {
+            return {
+                statusCode: 200,
+                headers: {
+                    'Access-Control-Allow-Origin': '*',
+                },
+                body: JSON.stringify(tierData),
+            };
+        })
+        .catch(err => {
+            console.log(`Error occurred during ticke prices GET`);
+            return {
+                statusCode: 500,
+                headers: {
+                    'Access-Control-Allow-Origin': '*',
+                },
+            };
+        });
 };

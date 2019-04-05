@@ -1,300 +1,283 @@
-<!DOCTYPE html>
-
-<head>
-  <meta charset="utf-8">
-
-  <title>Test client code</title>
-</head>
-
-<body>
-  <h1>Globee Interactions</h1>
-
-  <div>
-    <label for="name">
-      Name:
-    </label>
-    <input type="text" name="name" id="globee-name-input" />
-  </div>
-  <div>
-    <label for="email">
-      Email:
-    </label>
-    <input type="email" name="email" id="globee-email-input" />
-  </div>
-  <div>
-    <label for="globee-ticket-select">
-      Ticket Type:
-    </label>
-    <select id="globee-ticket-select">
-      <option value="">Select an option...</option>
-      <option value="tier-one-ticket">Tier 1 Ticket</option>
-      <option value="tier-two-ticket">Tier 2 Ticket</option>
-    </select>
-  </div>
-  <input type="submit" id="globee-submit">
-
-  <script src="index.js"></script>
-
-  <script src="https://checkout.stripe.com/checkout.js"></script>
-  <script>
-    const setUp = (tickets) => {
-      const formControls = {
-        purchaserName: document.getElementById('ticket-purchaser-name'),
-        purchaserEmail: document.getElementById('ticket-purchaser-email'),
-        tierOptions: document.querySelectorAll('input[name="ticket-tier"]'),
-        numTickets: document.getElementById('num-tickets'),
-        paymentType: document.getElementById('payment-type'),
-        submit: document.getElementById('submit-payment'),
-      };
-
-      formControls.numTickets.addEventListener('change', e => {
-        e.preventDefault();
-        const numAttendees = parseInt(e.target.value || 0, 10);
-        const target = document.getElementById('attendee-data');
-        const elems = [...Array(numAttendees).keys()].map((el, idx) => (`
-<div class="form-item field required">
-<label for="attendeeName-${idx + 1}">Attendee ${idx + 1} Name<span class="required">*</span></label>
-<input id="attendeeName-${idx + 1}" name="attendeeName" type="text" spellcheck="false" class="field-element" />
-<label for="attendeeInstitution-${idx + 1}">Attendee ${idx + 1} Institution</label>
-<input id="attendeeInstitution-${idx + 1}" Institution="attendeeInstitution-${idx}" type="text" spellcheck="false" class="field-element" />
-</div>
-`));
-        target.innerHTML = elems.join('');
-      });
-
-      const validate = () => {
-        const errs = [];
-
-        if (!formControls.purchaserName.value) {
-          errs.push('Name');
-        }
-
-        if (!formControls.purchaserEmail.value) {
-          errs.push('Email');
-        }
-
-        if (!([...formControls.tierOptions].filter(el => el.checked).length === 1)) {
-          errs.push('Ticket Tier');
-        }
-
-        const attendeeNameInputs = document.querySelectorAll('input[name="attendeeName"]');
-
-        if ([...attendeeNameInputs].filter(el => !el.value).length > 0) {
-          errs.push('Attendee Name(s)');
-        }
-
-        if (!formControls.paymentType.value) {
-          errs.push('Payment Type');
-        }
-
-        return errs;
-      };
-
-      const selectionDetails = () => {
-        const attendees = [...Array(formControls.numTickets.value)].map((i, idx) => {
-          return {
-            name: document.getElementById(`attendeeName-${idx + 1}`).value,
-            institution: document.getElementById(`attendeeInstitution-${idx + 1}`).value,
-          };
-        });
-
-        return {
-          purchaserName: formControls.purchaserName.value,
-          purchaserEmail: formControls.purchaserEmail.value,
-          tier: [...formControls.tierOptions].filter(el => el.checked)[0].value,
-          attendees,
-        };
-      };
-
-      const submitGlobeePayment = () => {
-        const payload = selectionDetails();
-
-        const endpoint = 'https://zeug267d9l.execute-api.us-east-2.amazonaws.com/v1/globee-payment';
-
-        fetch(endpoint, {
-          method: 'post',
-          body: JSON.stringify(payload),
-          headers: {
-            Accept: 'application/json',
-            'Content-Type': 'application/json',
-          },
-        })
-          .then(result => (result.json()))
-          .then(result => {
-            console.log(result);
-            window.location.replace(result.redirectUrl);
-          })
-          .catch(err => (alert("An error has occurred =(")));
-      };
-
-      const submitStripePayment = token => {
-        const selections = selectionDetails();
-        alert(`${JSON.stringify(token, undefined, 2)}`);
-      };
-
-      const purchaseInfo = () => {
-        const tier = ([...formControls.tierOptions].filter(el => el.checked)[0].value)
-          .replace('ticketTier_', '');
-
-        const info = tickets[tier];
-
-        return {
-          numTickets: formControls.numTickets.value,
-          tier,
-          price: info.price,
-        };
-      };
-
-      const openStripeCheckout = () => {
-        const checkoutHandler = StripeCheckout.configure({
-          key: 'pk_test_p4dcZV04R8GTCqSRa1p8TvFl',
-          locale: 'auto',
-        });
-
-        const details = purchaseInfo();
-
-        checkoutHandler.open({
-          name: 'MoneroKon.com',
-          image: 'https://static1.squarespace.com/static/5c34007696d455b78c0b2e54/t/5c36391f2b6a28bb356af3c2/1554447117780/?format=1500w',
-          description: `${details.numTickets} ticket${details.numTickets > 1 ? 's' : ''}; ${details.tier} tier`,
-          zipCode: true,
-          amount: details.price,
-          token: submitStripePayment,
-        });
-
-        window.addEventListener('popstate', function () {
-          checkoutHandler.close();
-        });
-      };
-
-
-      formControls.submit.addEventListener('click', e => {
-        e.preventDefault();
-        const validationErrs = validate();
-
-        if (validationErrs.length) {
-          alert(`Form validation errors:\n${validationErrs.join('\n')}`);
-          return;
-        }
-
-        if (formControls.paymentType.value === 'globee') {
-          submitGlobeePayment();
-        } else {
-          openStripeCheckout();
-        }
-      });
+<!-- Squarespace page HEAD (page - settings - advanced)  -->
+<script src="https://checkout.stripe.com/checkout.js"></script>
+<script>
+  const setUp = (tickets) => {
+    const formControls = {
+      purchaserName: document.getElementById('ticket-purchaser-name'),
+      purchaserEmail: document.getElementById('ticket-purchaser-email'),
+      tierOptions: document.querySelectorAll('input[name="ticket-tier"]'),
+      numTickets: document.getElementById('num-tickets'),
+      paymentType: document.getElementById('payment-type'),
+      submit: document.getElementById('submit-payment'),
     };
 
-    const ticketData = () => {
-      const formatter = new Intl.NumberFormat('en-US', {
-        style: 'currency',
-        currency: 'USD',
-        minimumFractionDigits: 2
+    formControls.numTickets.addEventListener('change', e => {
+      e.preventDefault();
+      const numAttendees = parseInt(e.target.value || 0, 10);
+      const target = document.getElementById('attendee-data');
+      const elems = [...Array(numAttendees).keys()].map((el, idx) => (`
+  <div class="form-item field required">
+  <label for="attendeeName-${idx + 1}">Attendee ${idx + 1} Name<span class="required">*</span></label>
+  <input id="attendeeName-${idx + 1}" name="attendeeName" type="text" spellcheck="false" class="field-element" />
+  <label for="attendeeInstitution-${idx + 1}">Attendee ${idx + 1} Institution</label>
+  <input id="attendeeInstitution-${idx + 1}" Institution="attendeeInstitution-${idx}" type="text" spellcheck="false" class="field-element" />
+  </div>
+  `));
+      target.innerHTML = elems.join('');
+    });
+
+    const validate = () => {
+      const errs = [];
+
+      if (!formControls.purchaserName.value) {
+        errs.push('Name');
+      }
+
+      if (!formControls.purchaserEmail.value) {
+        errs.push('Email');
+      }
+
+      if (!([...formControls.tierOptions].filter(el => el.checked).length === 1)) {
+        errs.push('Ticket Tier');
+      }
+
+      const attendeeNameInputs = document.querySelectorAll('input[name="attendeeName"]');
+
+      if ([...attendeeNameInputs].filter(el => !el.value).length > 0) {
+        errs.push('Attendee Name(s)');
+      }
+
+      if (!formControls.paymentType.value) {
+        errs.push('Payment Type');
+      }
+
+      return errs;
+    };
+
+    const selectionDetails = () => {
+      const numAttendees = parseInt(formControls.numTickets.value, 10);
+      const attendees = [...Array(numAttendees)].map((i, idx) => {
+        return {
+          name: document.getElementById(`attendeeName-${idx + 1}`).value,
+          institution: document.getElementById(`attendeeInstitution-${idx + 1}`).value,
+        };
       });
 
-      const endpoint = 'https://zeug267d9l.execute-api.us-east-2.amazonaws.com/v1/ticket-info';
+      return {
+        purchaserName: formControls.purchaserName.value,
+        purchaserEmail: formControls.purchaserEmail.value,
+        tier: [...formControls.tierOptions].filter(el => el.checked)[0].value,
+        attendees,
+      };
+    };
 
-      return fetch(endpoint)
+    const submitGlobeePayment = () => {
+      const payload = selectionDetails();
+
+      const endpoint = 'https://zeug267d9l.execute-api.us-east-2.amazonaws.com/v1/globee-payment';
+
+      fetch(endpoint, {
+        method: 'post',
+        body: JSON.stringify(payload),
+        headers: {
+          Accept: 'application/json',
+          'Content-Type': 'application/json',
+        },
+      })
         .then(result => (result.json()))
         .then(result => {
-          document.getElementById('studentPrice').innerText = formatter.format(result.student.price);
-          document.getElementById('studentInventory').innerText = result.student.inventory;
-          document.getElementById('generalPrice').innerText = formatter.format(result.general.price);
-          document.getElementById('generalInventory').innerText = result.general.inventory;
-          document.getElementById('platinumPrice').innerText = formatter.format(result.platinum.price);
-          document.getElementById('platinumInventory').innerText = result.platinum.inventory;
-          return result;
-        });
+          console.log(result);
+          window.location.replace(result.redirectUrl);
+        })
+        .catch(err => (alert("An error has occurred =(")));
     };
 
-    document.addEventListener('DOMContentLoaded', e => {
+    const submitStripePayment = token => {
+      const payload = selectionDetails();
+      payload.token = token;
+
+      const endpoint = 'https://zeug267d9l.execute-api.us-east-2.amazonaws.com/v1/stripe-payment';
+
+      fetch(endpoint, {
+        method: 'post',
+        body: JSON.stringify(payload),
+        headers: {
+          Accept: 'application/json',
+          'Content-Type': 'application/json',
+        },
+      })
+        .then(() => {
+          window.location.replace('https://monerokon.com/purchasesuccess');
+        })
+        .catch(err => {
+          alert('There was an error processing your credit card payment');
+        })
+    };
+
+    const purchaseInfo = () => {
+      const tier = ([...formControls.tierOptions].filter(el => el.checked)[0].value)
+        .replace('ticketTier_', '');
+
+      const info = tickets[tier];
+      const numTickets = formControls.numTickets.value;
+      const price = info.price * numTickets;
+
+      return {
+        numTickets,
+        tier,
+        price,
+      };
+    };
+
+    const openStripeCheckout = () => {
+      const checkoutHandler = StripeCheckout.configure({
+        key: 'pk_test_p4dcZV04R8GTCqSRa1p8TvFl',
+        locale: 'auto',
+      });
+
+      const details = purchaseInfo();
+
+      checkoutHandler.open({
+        name: 'MoneroKon.com',
+        image: 'https://static1.squarespace.com/static/5c34007696d455b78c0b2e54/t/5c36391f2b6a28bb356af3c2/1554447117780/?format=1500w',
+        description: `${details.numTickets} ticket${details.numTickets > 1 ? 's' : ''}; ${details.tier} tier`,
+        zipCode: true,
+        amount: details.price * 100,
+        token: submitStripePayment,
+      });
+
+      window.addEventListener('popstate', function () {
+        checkoutHandler.close();
+      });
+    };
+
+
+    formControls.submit.addEventListener('click', e => {
       e.preventDefault();
-      ticketData()
-        .then(setUp);
+      const validationErrs = validate();
+
+      if (validationErrs.length) {
+        alert(`Form validation errors:\n${validationErrs.join('\n')}`);
+        return;
+      }
+
+      if (formControls.paymentType.value === 'globee') {
+        submitGlobeePayment();
+      } else {
+        openStripeCheckout();
+      }
     });
-  </script>
+  };
 
-  <div class="pricing-data">
-    <ul>
-      <li>
-        <h3>Student*</h3>
-        <div>Price: <span id="studentPrice"></span></div>
-        <div>Inventory: <span id="studentInventory"></span></div>
-        <div style="margin-bottom: 15px;"><small>* Valid .edu email required</small></div>
-      </li>
-      <li>
-        <h3>General</h3>
-        <div>Price: <span id="generalPrice"></span></div>
-        <div style="margin-bottom: 15px;">Inventory: <span id="generalInventory"></span></div>
-      </li>
-      <li>
-        <h3>Platinum</h3>
-        <div>Price: <span id="platinumPrice"></span></div>
-        <div style="margin-bottom: 15px;">Inventory: <span id="platinumInventory"></span></div>
-      </li>
-    </ul>
-  </div>
+  const ticketData = () => {
+    const formatter = new Intl.NumberFormat('en-US', {
+      style: 'currency',
+      currency: 'USD',
+      minimumFractionDigits: 2
+    });
 
-  <div class="sqs-block form-block sqs-block-form" data-block-type="9">
-    <div class="sqs-block-content">
-      <div class="form-wrapper">
-        <div class="form-inner-wrapper">
-          <div class="field-list clear">
-            <div class="form-item field email required">
-              <label class="title" for="ticket-purchaser-name">Name<span class="required">*</span></label>
-              <input class="field-element" name="email" x-autocompletetype="email" type="text" spellcheck="false"
-                id="ticket-purchaser-name">
-            </div>
+    const endpoint = 'https://zeug267d9l.execute-api.us-east-2.amazonaws.com/v1/ticket-info';
 
-            <div class="form-item field email required">
-              <label class="title" for="ticket-purchaser-email">Email <span class="required">*</span></label>
-              <input class="field-element" name="email" x-autocompletetype="email" type="text" spellcheck="false"
-                id="ticket-purchaser-email">
-            </div>
+    return fetch(endpoint)
+      .then(result => (result.json()))
+      .then(result => {
+        document.getElementById('studentPrice').innerText = formatter.format(result.student.price);
+        document.getElementById('studentInventory').innerText = result.student.inventory;
+        document.getElementById('generalPrice').innerText = formatter.format(result.general.price);
+        document.getElementById('generalInventory').innerText = result.general.inventory;
+        document.getElementById('platinumPrice').innerText = formatter.format(result.platinum.price);
+        document.getElementById('platinumInventory').innerText = result.platinum.inventory;
+        return result;
+      });
+  };
 
-            <legend class="title" for="ticket-tier">Tier<span class="required">*</span></legend>
+  document.addEventListener('DOMContentLoaded', e => {
+    e.preventDefault();
+    ticketData()
+      .then(setUp);
+  });
+</script>
 
+<!-- Squarespace code block -->
+<div class="pricing-data">
+  <ul>
+    <li>
+      <h3>Student*</h3>
+      <div>Price: <span id="studentPrice"></span></div>
+      <div>Inventory: <span id="studentInventory"></span></div>
+      <div style="margin-bottom: 15px;"><small>* Valid .edu email required</small></div>
+    </li>
+    <li>
+      <h3>General</h3>
+      <div>Price: <span id="generalPrice"></span></div>
+      <div style="margin-bottom: 15px;">Inventory: <span id="generalInventory"></span></div>
+    </li>
+    <li>
+      <h3>Platinum</h3>
+      <div>Price: <span id="platinumPrice"></span></div>
+      <div style="margin-bottom: 15px;">Inventory: <span id="platinumInventory"></span></div>
+    </li>
+  </ul>
+</div>
+
+<div class="sqs-block form-block sqs-block-form" data-block-type="9">
+  <div class="sqs-block-content">
+    <div class="form-wrapper">
+      <div class="form-inner-wrapper">
+        <div class="field-list clear">
+          <div class="form-item field email required">
+            <label class="title" for="ticket-purchaser-name">Name<span class="required">*</span></label>
+            <input class="field-element" name="email" x-autocompletetype="email" type="text" spellcheck="false"
+              id="ticket-purchaser-name">
+          </div>
+
+          <div class="form-item field email required">
+            <label class="title" for="ticket-purchaser-email">Email <span class="required">*</span></label>
+            <input class="field-element" name="email" x-autocompletetype="email" type="text" spellcheck="false"
+              id="ticket-purchaser-email">
+          </div>
+
+          <legend class="title" for="ticket-tier">Tier<span class="required">*</span></legend>
+
+          <div class="form-item field required">
+            <input type="radio" name="ticket-tier" value="general" id="ticketTier_general"><label
+              for="ticketTier_general">General</label>
+            <input type="radio" name="ticket-tier" value="platinum" id="ticketTier_platinum"><label
+              for="ticketTier_platinum">Platinum</label>
+            <input type="radio" name="ticket-tier" value="student" id="ticketTier_student"><label
+              for="ticketTier_student">Student</label>
+          </div>
+
+          <div class="form-item field required">
+            <label for="num-tickets"># of Tickets<span class="required">*</span></label>
+            <input type="number" value="1" min="1" class="field-element" value=0 id="num-tickets" />
+          </div>
+
+          <div id="attendee-data">
             <div class="form-item field required">
-              <input type="radio" name="ticket-tier" value="general" id="ticketTier_general"><label
-                for="ticketTier_general">General</label>
-              <input type="radio" name="ticket-tier" value="platinum" id="ticketTier_platinum"><label
-                for="ticketTier_platinum">Platinum</label>
-              <input type="radio" name="ticket-tier" value="student" id="ticketTier_student"><label
-                for="ticketTier_student">Student</label>
+              <label for="attendeeName-1">Attendee 1 Name<span class="required">*</span></label>
+              <input id="attendeeName-1" name="attendeeName" type="text" spellcheck="false" class="field-element" />
+              <label for="attendeeInstitution-1">Attendee 1 Institution</label>
+              <input id="attendeeInstitution-1" Institution="attendeeInstitution-1" type="text" spellcheck="false"
+                class="field-element" />
             </div>
+          </div>
 
-            <div class="form-item field required">
-              <label for="num-tickets"># of Tickets<span class="required">*</span></label>
-              <input type="number" value="1" min="1" class="field-element" value=0 id="num-tickets" />
-            </div>
+          <div class="form-item field required">
+            <label for="paymentType">How would you like to pay for tickets?<span class="required">*</span></label>
+            <select id="payment-type" class="field-element">
+              <option value="">- Select an option -</option>
+              <option value="globee">Cryptocurrency (powered by Globee)</option>
+              <option value="stripe">Credit Card (powered by Stripe)</option>
+            </select>
+          </div>
 
-            <div id="attendee-data">
-              <div class="form-item field required">
-                <label for="attendeeName-1">Attendee 1 Name<span class="required">*</span></label>
-                <input id="attendeeName-1" name="attendeeName" type="text" spellcheck="false" class="field-element" />
-                <label for="attendeeInstitution-1">Attendee 1 Institution</label>
-                <input id="attendeeInstitution-1" Institution="attendeeInstitution-1" type="text" spellcheck="false"
-                  class="field-element" />
-              </div>
-            </div>
-
-            <div class="form-item field required">
-              <label for="paymentType">How would you like to pay for tickets?<span class="required">*</span></label>
-              <select id="payment-type" class="field-element">
-                <option value="">- Select an option -</option>
-                <option value="globee">Cryptocurrency (powered by Globee)</option>
-                <option value="stripe">Credit Card (powered by Stripe)</option>
-              </select>
-            </div>
-
-
-
-            <div class="form-button-wrapper form-button-wrapper--align-left">
-              <input class="button sqs-system-button sqs-editable-button" type="submit" value="Submit"
-                id="submit-payment">
-            </div>
+          <div class="form-button-wrapper form-button-wrapper--align-left">
+            <input class="button sqs-system-button sqs-editable-button" type="submit" value="Submit"
+              id="submit-payment">
           </div>
         </div>
       </div>
     </div>
   </div>
+</div>

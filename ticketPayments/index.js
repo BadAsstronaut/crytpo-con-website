@@ -2,9 +2,10 @@
 
 require('dotenv').config();
 
-const crypto = require('crypto');
 const aws = require('aws-sdk');
+const crypto = require('crypto');
 const requester = require('request-promise-native');
+const stripe = require('stripe')(process.env.STRIPE_AUTH);
 
 const dynamoClient = new aws.DynamoDB.DocumentClient();
 
@@ -80,12 +81,29 @@ const createGlobeePayment = (payment) => {
                 customer: parsed.data.customer,
                 redirectUrl: parsed.data.redirect_url,
                 expiresAt: parsed.data.expires_at,
-
             };
         })
         .catch(err => { throw err; });
 };
 
+const createStripePayment = (payment, token) => {
+    console.log(`Creating stripe payment with payment info:\n${JSON.stringify(payment, undefined, 2)}`);
+    console.log(`Token: ${JSON.stringify(token, undefined, 2)}`);
+
+    return stripe.charges.create({
+        amount: payment.total * 100,
+        currency: 'usd',
+        source: token.id,
+    })
+        .then(charge => {
+            console.log(`Successfully charged Stripe:\n${JSON.stringify(charge, undefined, 2)}`);
+            return charge;
+        })
+        .catch(err => {
+            console.log(`Error processing stripe transaction: ${err.message}`);
+            throw err;
+        });
+};
 
 // Dynamo-mite! (aka dynamo queries)
 const queryPartition = (pk) => {
@@ -100,24 +118,53 @@ const queryPartition = (pk) => {
         .catch(err => { throw err; });
 };
 
-const putTransactionPlaceholder = (globeeResponse, tierInfo, attendees) => {
+const putStripeTransaction = (stripeResponse, tierInfo, attendees, paymentInfo) => {
+    const attendeeRecords = createAttendeeData(tierInfo.inventory.current, tierInfo.partitionKey, attendees);
+    const stripePaymentInfo = {
+        id: stripeResponse.id,
+        transactionType: 'stripe',
+        status: 'paid',
+        total: (stripeResponse.amount / 100),
+        currency: stripeResponse.currency,
+        customer: {
+            email: paymentInfo.email,
+            name: paymentInfo.name,
+        },
+        expiresAt: null,
+    };
+
+    const transactionObject = createTransactionObject(tierInfo, stripePaymentInfo, attendeeRecords);
+
+    console.log(`Transaction: ${JSON.stringify(transactionObject, undefined, 2)}`);
+    const batchParams = {
+        RequestItems: {
+            [DYNAMO_TABLE]: [{ PutRequest: { Item: transactionObject } }]
+        }
+    };
+
+    return Promise.all([
+        dynamoClient.batchWrite(batchParams).promise(),
+        updateAttendees(tierInfo.partitionKey, attendeeRecords),
+    ])
+        .catch(err => {
+            console.error(`Error saving to dynamo: ${err.message}`);
+            throw error;
+        });;
+}
+
+const putGlobeeTransaction = (globeeResponse, tierInfo, attendees) => {
     // create attendee records here and add to attendees on success! :D
-    const mapAttendeeFn = createUnconfirmedAttendee(tierInfo.inventory.current, tierInfo.partitionKey);
-    const attendeeRecords = attendees.map(mapAttendeeFn);
+    const attendeeRecords = createAttendeeData(tierInfo.inventory.current, tierInfo.partitionKey, attendees);
 
     console.log(JSON.stringify(globeeResponse));
 
-    const transactionObject = {
-        PartitionKey: tierInfo.partitionKey,
-        SortKey: `${sortKeys.prefixes.transaction}${globeeResponse.id}`,
-        PaymentType: 'globee',
-        Status: [{ status: globeeResponse.status, date: isoDate() }],
-        Amount: globeeResponse.total,
-        Currency: globeeResponse.currency,
-        Customer: globeeResponse.customer,
-        ExpiresAt: globeeResponse.expiresAt,
-        Attendees: attendeeRecords,
-    };
+    const transactionObject = createTransactionObject(
+        tierInfo,
+        Object.assign(
+            globeeResponse,
+            { transactionType: 'globee' }),
+        attendeeRecords,
+    );
 
     const inventoryHolds = attendeeRecords
         .map((i, idx) => {
@@ -195,20 +242,28 @@ const updateTransaction = async (updateData) => {
     ];
 
     if (status === 'paid') {
-        const updateParams = {
-            TableName: DYNAMO_TABLE,
-            Key: { PartitionKey: partitionKey, SortKey: sortKeys.attendees },
-            UpdateExpression: `SET AttendeeList = list_append(AttendeeList, :newAttendees)`,
-            ExpressionAttributeValues: {
-                ':newAttendees': transaction.Attendees,
-            },
-        };
-
-        console.log(`updateParams: ${JSON.stringify(updateParams)}`);
-        promises.push(dynamoClient.update(updateParams).promise());
+        promises.push(updateAttendees(partitionKey, transaction.Attendees));
     }
 
     return Promise.all(promises);
+};
+
+const updateAttendees = (partitionKey, attendees) => {
+    const updateParams = {
+        TableName: DYNAMO_TABLE,
+        Key: { PartitionKey: partitionKey, SortKey: sortKeys.attendees },
+        UpdateExpression: `SET AttendeeList = list_append(AttendeeList, :newAttendees)`,
+        ExpressionAttributeValues: {
+            ':newAttendees': attendees,
+        },
+    };
+
+    console.log(`updateParams: ${JSON.stringify(updateParams)}`);
+    return dynamoClient.update(updateParams).promise()
+        .catch(err => {
+            console.error(`Error saving attendees: ${err.message}`);
+            throw error;
+        });
 };
 
 // utility functions
@@ -248,14 +303,27 @@ const createHash = (raw) => {
         .digest('hex');
 };
 
-const createUnconfirmedAttendee = (inventory, partitionKey) => (attendee, idx) => {
+const createTransactionObject = (tierInfo, paymentInfo, attendeeRecords) => ({
+    PartitionKey: tierInfo.partitionKey,
+    SortKey: `${sortKeys.prefixes.transaction}${paymentInfo.id}`,
+    PaymentType: paymentInfo.transactionType,
+    Status: [{ status: paymentInfo.status, date: isoDate() }],
+    Amount: paymentInfo.total,
+    Currency: paymentInfo.currency,
+    Customer: paymentInfo.customer,
+    ExpiresAt: paymentInfo.expiresAt || null,
+    Attendees: attendeeRecords,
+});
+
+
+const createAttendeeData = (inventory, partitionKey, attendees) => (attendees.map((attendee, idx) => {
     // attendee hash = H(ticket-tier + name + institution + ticket number)
     return {
         name: attendee.name,
         institution: attendee.institution,
         identifier: createHash(`${partitionKey}${attendee.name}${attendee.institution}${inventory - idx}`),
     };
-};
+}));
 
 const extractElementBySortKey = (items, keyVal) => {
     return items
@@ -355,7 +423,7 @@ module.exports.globeePayment = async (e) => {
         rawTierData.Items,
         purchaserName,
         purchaserEmail,
-        attendees.length
+        attendees.length,
     );
 
     let globeeResponse;
@@ -366,7 +434,7 @@ module.exports.globeePayment = async (e) => {
         return appErrorResponse;
     }
 
-    return putTransactionPlaceholder(globeeResponse, tierInfo, attendees)
+    return putGlobeeTransaction(globeeResponse, tierInfo, attendees)
         .then(() => ({
             statusCode: 201,
             headers: {
@@ -396,12 +464,65 @@ module.exports.globeePaymentWebhook = async e => {
         });
 };
 
-module.exports.globeePendingTimeout = async e => {
-    // https://aws.amazon.com/blogs/database/automatically-archive-items-to-s3-using-dynamodb-time-to-live-with-aws-lambda-and-amazon-kinesis-firehose/
-};
-
 module.exports.stripePayment = async e => {
+    const {
+        purchaserName,
+        purchaserEmail,
+        tier,
+        attendees,
+        token,
+    } = JSON.parse(e.body);
 
+    if (tier === 'student' && !purchaserEmail.endsWith('.edu')) {
+        return badRequestResponse(`Requires .edu email to purchase student tickets`);
+    }
+
+    let rawTierData;
+    try {
+        rawTierData = await queryPartition(`ticketTier_${tier}`);
+    } catch (err) {
+        console.error(`Error retrieving tier data: ${err.message}`, err);
+        return appErrorResponse;
+    }
+
+    if (!(rawTierData.Items && rawTierData.Items.length)) {
+        return badRequestResponse(`No ticket information was found for ${tier}`);
+    }
+
+    if (!(remainingInventory(rawTierData.Items) >= attendees.length)) {
+        return badRequestResponse(`No inventory for ${tier} available`);
+    }
+
+    const tierInfo = remapTier(rawTierData);
+
+    const paymentInfo = paymentDetails(
+        rawTierData.Items,
+        purchaserName,
+        purchaserEmail,
+        attendees.length,
+    );
+
+    return createStripePayment(paymentInfo, token)
+        .then(charge => {
+            return putStripeTransaction(charge, tierInfo, attendees, paymentInfo);
+        })
+        .then(() => {
+            return {
+                statusCode: 201,
+                headers: {
+                    'Access-Control-Allow-Origin': '*',
+                },
+                body: ''
+            };
+        })
+        .catch(err => {
+            return {
+                statusCode: 500,
+                headers: {
+                    'Access-Control-Allow-Origin': '*',
+                },
+            };
+        });
 };
 
 module.exports.ticketPricesAndInventory = async e => {

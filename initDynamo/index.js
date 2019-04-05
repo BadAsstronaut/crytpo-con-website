@@ -56,7 +56,7 @@ module.exports.handler = (e, ctx, cb) => {
 
     dynamo.batchWriteItem(params).promise()
         .then(data => {
-            console.log(`Successfully seeded the CryptoCon table with ${data}`);
+            console.log(`Successfully seeded the CryptoCon table with ${JSON.stringify(data, undefined, 2)}`);
             return generateResponse(e, ctx, responseStatus.success, cb);
         })
         .catch(err => {

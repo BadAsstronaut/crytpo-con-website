@@ -145,11 +145,54 @@
       });
     };
 
+    const ticketData = () => {
+      const formatter = new Intl.NumberFormat('en-US', {
+        style: 'currency',
+        currency: 'USD',
+        minimumFractionDigits: 2
+      });
+
+      const endpoint = 'https://zeug267d9l.execute-api.us-east-2.amazonaws.com/v1/ticket-info';
+
+      return fetch(endpoint)
+        .then(result => (result.json()))
+        .then(result => {
+          document.getElementById('studentPrice').innerText = formatter.format(result.student.price);
+          document.getElementById('studentInventory').innerText = result.student.inventory;
+          document.getElementById('generalPrice').innerText = formatter.format(result.general.price);
+          document.getElementById('generalInventory').innerText = result.general.inventory;
+          document.getElementById('platinumPrice').innerText = formatter.format(result.platinum.price);
+          document.getElementById('platinumInventory').innerText = result.platinum.inventory;
+        });
+    };
+
     document.addEventListener('DOMContentLoaded', e => {
       e.preventDefault();
+      ticketData();
       setUp();
     });
   </script>
+
+  <div class="pricing-data">
+    <ul>
+      <li>
+        <h3>Student*</h3>
+        <div>Price: <span id="studentPrice"></span></div>
+        <div>Inventory: <span id="studentInventory"></span></div>
+        <div style="margin-bottom: 15px;"><small>* Valid .edu email required</small></div>
+      </li>
+      <li>
+        <h3>General</h3>
+        <div>Price: <span id="generalPrice"></span></div>
+        <div style="margin-bottom: 15px;">Inventory: <span id="generalInventory"></span></div>
+      </li>
+      <li>
+        <h3>Platinum</h3>
+        <div>Price: <span id="platinumPrice"></span></div>
+        <div style="margin-bottom: 15px;">Inventory: <span id="platinumInventory"></span></div>
+      </li>
+    </ul>
+  </div>
 
   <div class="sqs-block form-block sqs-block-form" data-block-type="9">
     <div class="sqs-block-content">
@@ -203,17 +246,6 @@
               </select>
             </div>
 
-            <div id="credit-card-processing-form" class="hidden">
-              <form action="your-server-side-code" method="POST">
-                <script src="https://checkout.stripe.com/checkout.js" class="stripe-button"
-                  data-key="pk_test_TYooMQauvdEDq54NiTphI7jx" data-amount="999" data-name="Stripe.com"
-                  data-description="Example charge"
-                  data-image="https://stripe.com/img/documentation/checkout/marketplace.png" data-locale="auto"
-                  data-zip-code="true">
-                  </script>
-              </form>
-            </div>
-
             <div class="form-button-wrapper form-button-wrapper--align-left">
               <input class="button sqs-system-button sqs-editable-button" type="submit" value="Submit"
                 id="submit-payment">
@@ -223,13 +255,3 @@
       </div>
     </div>
   </div>
-</body>
-
-
-<!-- <div class="form-item field required">
-  <label for="attendeeName-1">Attendee 1 Name<span class="required">*</span></label>
-  <input id="attendeeName-1" name="attendeeName-1" type="text" spellcheck="false" class="field-element" />
-  <label for="attendeeInstitution-1">Attendee 1 Institution<span class="required">*</span></label>
-  <input id="attendeeInstitution-1" Institution="attendeeInstitution-1" type="text" spellcheck="false"
-    class="field-element" />
-</div> -->

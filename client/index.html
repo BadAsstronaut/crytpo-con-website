@@ -35,8 +35,9 @@
 
   <script src="index.js"></script>
 
+  <script src="https://checkout.stripe.com/checkout.js"></script>
   <script>
-    const setUp = () => {
+    const setUp = (tickets) => {
       const formControls = {
         purchaserName: document.getElementById('ticket-purchaser-name'),
         purchaserEmail: document.getElementById('ticket-purchaser-email'),
@@ -86,14 +87,10 @@
           errs.push('Payment Type');
         }
 
-        if (formControls.paymentType.value === 'stripe') {
-          errs.push('Credit Card Information');
-        }
-
         return errs;
       };
 
-      const submitGlobeePayment = () => {
+      const selectionDetails = () => {
         const attendees = [...Array(formControls.numTickets.value)].map((i, idx) => {
           return {
             name: document.getElementById(`attendeeName-${idx + 1}`).value,
@@ -101,12 +98,16 @@
           };
         });
 
-        const payload = {
+        return {
           purchaserName: formControls.purchaserName.value,
           purchaserEmail: formControls.purchaserEmail.value,
           tier: [...formControls.tierOptions].filter(el => el.checked)[0].value,
           attendees,
         };
+      };
+
+      const submitGlobeePayment = () => {
+        const payload = selectionDetails();
 
         const endpoint = 'https://zeug267d9l.execute-api.us-east-2.amazonaws.com/v1/globee-payment';
 
@@ -126,7 +127,46 @@
           .catch(err => (alert("An error has occurred =(")));
       };
 
-      const submitStripePayment = () => { };
+      const submitStripePayment = token => {
+        const selections = selectionDetails();
+        alert(`${JSON.stringify(token, undefined, 2)}`);
+      };
+
+      const purchaseInfo = () => {
+        const tier = ([...formControls.tierOptions].filter(el => el.checked)[0].value)
+          .replace('ticketTier_', '');
+
+        const info = tickets[tier];
+
+        return {
+          numTickets: formControls.numTickets.value,
+          tier,
+          price: info.price,
+        };
+      };
+
+      const openStripeCheckout = () => {
+        const checkoutHandler = StripeCheckout.configure({
+          key: 'pk_test_p4dcZV04R8GTCqSRa1p8TvFl',
+          locale: 'auto',
+        });
+
+        const details = purchaseInfo();
+
+        checkoutHandler.open({
+          name: 'MoneroKon.com',
+          image: 'https://static1.squarespace.com/static/5c34007696d455b78c0b2e54/t/5c36391f2b6a28bb356af3c2/1554447117780/?format=1500w',
+          description: `${details.numTickets} ticket${details.numTickets > 1 ? 's' : ''}; ${details.tier} tier`,
+          zipCode: true,
+          amount: details.price,
+          token: submitStripePayment,
+        });
+
+        window.addEventListener('popstate', function () {
+          checkoutHandler.close();
+        });
+      };
+
 
       formControls.submit.addEventListener('click', e => {
         e.preventDefault();
@@ -140,7 +180,7 @@
         if (formControls.paymentType.value === 'globee') {
           submitGlobeePayment();
         } else {
-          submitStripePayment();
+          openStripeCheckout();
         }
       });
     };
@@ -163,13 +203,14 @@
           document.getElementById('generalInventory').innerText = result.general.inventory;
           document.getElementById('platinumPrice').innerText = formatter.format(result.platinum.price);
           document.getElementById('platinumInventory').innerText = result.platinum.inventory;
+          return result;
         });
     };
 
     document.addEventListener('DOMContentLoaded', e => {
       e.preventDefault();
-      ticketData();
-      setUp();
+      ticketData()
+        .then(setUp);
     });
   </script>
 
@@ -245,6 +286,8 @@
                 <option value="stripe">Credit Card (powered by Stripe)</option>
               </select>
             </div>
+
+
 
             <div class="form-button-wrapper form-button-wrapper--align-left">
               <input class="button sqs-system-button sqs-editable-button" type="submit" value="Submit"

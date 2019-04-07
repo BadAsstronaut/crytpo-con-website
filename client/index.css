@@ -1,0 +1,10 @@
+
+/* Place  in custom css editor */
+#monerokon-registration-form {
+    .flex-wrapper {
+      display: flex;
+      flex-direction: row;
+      flex-wrap: wrap;
+      justify-content: space-evenly;
+    }
+  }

@@ -1,6 +1,12 @@
 <!-- Squarespace page HEAD (page - settings - advanced)  -->
 <script src="https://checkout.stripe.com/checkout.js"></script>
 <script>
+  const formatter = new Intl.NumberFormat('en-US', {
+    style: 'currency',
+    currency: 'USD',
+    minimumFractionDigits: 2
+  });
+
   const setUp = (tickets) => {
     const formControls = {
       purchaserName: document.getElementById('ticket-purchaser-name'),
@@ -9,6 +15,7 @@
       numTickets: document.getElementById('num-tickets'),
       paymentType: document.getElementById('payment-type'),
       submit: document.getElementById('submit-payment'),
+      allowEmail: document.getElementById('allow-email'),
     };
 
     formControls.numTickets.addEventListener('change', e => {
@@ -23,8 +30,26 @@
   <input id="attendeeInstitution-${idx + 1}" Institution="attendeeInstitution-${idx}" type="text" spellcheck="false" class="field-element" />
   </div>
   `));
+
       target.innerHTML = elems.join('');
     });
+
+    const priceChangeListener = (e) => {
+      let tier
+      try {
+        tier = [...formControls.tierOptions].filter(el => el.checked)[0].value;
+      } catch {
+        return;
+      }
+
+      const { price } = tickets[tier];
+      const numTickets = parseInt(formControls.numTickets.value, 10);
+      const total = numTickets * Number(price);
+      document.getElementById('price').innerHTML = formatter.format(total);
+    }
+
+    [...document.getElementsByClassName('js-price-control')]
+      .map(el => (el.addEventListener('change', priceChangeListener)));
 
     const validate = () => {
       const errs = [];
@@ -63,11 +88,14 @@
         };
       });
 
+      const allowEmail = formControls.allowEmail.checked;
+
       return {
         purchaserName: formControls.purchaserName.value,
         purchaserEmail: formControls.purchaserEmail.value,
         tier: [...formControls.tierOptions].filter(el => el.checked)[0].value,
         attendees,
+        allowEmail,
       };
     };
 
@@ -84,15 +112,29 @@
           'Content-Type': 'application/json',
         },
       })
-        .then(result => (result.json()))
+        .then(result => {
+          return result.json()
+            .then((body) => {
+              if (!result.ok) {
+                throw body.message;
+              }
+
+              return body;
+            });
+        })
         .then(result => {
           console.log(result);
           window.location.replace(result.redirectUrl);
         })
-        .catch(err => (alert("An error has occurred =(")));
+        .catch(err => {
+          document.getElementById('loading-overlay').setAttribute('hidden', '');
+          alert(`An error has occurred:\n${err}`);
+        });
     };
 
     const submitStripePayment = token => {
+      document.getElementById('loading-overlay').removeAttribute('hidden');
+
       const payload = selectionDetails();
       payload.token = token;
 
@@ -106,11 +148,22 @@
           'Content-Type': 'application/json',
         },
       })
-        .then(() => {
-          window.location.replace('https://monerokon.com/purchasesuccess');
+        .then((result) => {
+          return result.json()
+            .then((body) => {
+              if (!result.ok) {
+                throw body.message;
+              }
+
+              return body;
+            });
+        })
+        .then((result) => {
+          window.location.replace(result.redirectUrl);
         })
         .catch(err => {
-          alert('There was an error processing your credit card payment');
+          document.getElementById('loading-overlay').setAttribute('hidden', '');
+          alert(`There was an error processing your credit card payment:\n${err}`);
         })
     };
 
@@ -162,6 +215,7 @@
       }
 
       if (formControls.paymentType.value === 'globee') {
+        document.getElementById('loading-overlay').removeAttribute('hidden');
         submitGlobeePayment();
       } else {
         openStripeCheckout();
@@ -170,13 +224,11 @@
   };
 
   const ticketData = () => {
-    const formatter = new Intl.NumberFormat('en-US', {
-      style: 'currency',
-      currency: 'USD',
-      minimumFractionDigits: 2
-    });
-
     const endpoint = 'https://m4479sepxd.execute-api.us-east-1.amazonaws.com/v1/ticket-info';
+
+    const loadingOverlay = document.getElementById('loading-overlay');
+
+    loadingOverlay.removeAttribute('hidden');
 
     return fetch(endpoint)
       .then(result => (result.json()))
@@ -187,6 +239,7 @@
         document.getElementById('generalInventory').innerText = result.general.inventory;
         document.getElementById('platinumPrice').innerText = formatter.format(result.platinum.price);
         document.getElementById('platinumInventory').innerText = result.platinum.inventory;
+        loadingOverlay.setAttribute('hidden', '');
         return result;
       });
   };
@@ -199,6 +252,96 @@
 </script>
 
 <!-- Squarespace code block -->
+<div id="loading-overlay"
+  style="position:fixed;width:100%;height:100%;left:0;top:0;background:rgba(60,60,60,0.5);z-index:10;" hidden>
+  <div style="top:50%;left:50%;margin-left:-100px;margin-top:-100px;" class="lds-double-ring">
+    <div></div>
+    <div></div>
+  </div>
+  <style type="text/css">
+    @keyframes lds-double-ring {
+      0% {
+        -webkit-transform: rotate(0);
+        transform: rotate(0);
+      }
+
+      100% {
+        -webkit-transform: rotate(360deg);
+        transform: rotate(360deg);
+      }
+    }
+
+    @-webkit-keyframes lds-double-ring {
+      0% {
+        -webkit-transform: rotate(0);
+        transform: rotate(0);
+      }
+
+      100% {
+        -webkit-transform: rotate(360deg);
+        transform: rotate(360deg);
+      }
+    }
+
+    @keyframes lds-double-ring_reverse {
+      0% {
+        -webkit-transform: rotate(0);
+        transform: rotate(0);
+      }
+
+      100% {
+        -webkit-transform: rotate(-360deg);
+        transform: rotate(-360deg);
+      }
+    }
+
+    @-webkit-keyframes lds-double-ring_reverse {
+      0% {
+        -webkit-transform: rotate(0);
+        transform: rotate(0);
+      }
+
+      100% {
+        -webkit-transform: rotate(-360deg);
+        transform: rotate(-360deg);
+      }
+    }
+
+    .lds-double-ring {
+      position: relative;
+    }
+
+    .lds-double-ring div {
+      position: absolute;
+      width: 80px;
+      height: 80px;
+      top: 60px;
+      left: 60px;
+      border-radius: 50%;
+      border: 8px solid #000;
+      border-color: #d88c51 transparent #d88c51 transparent;
+      -webkit-animation: lds-double-ring 1.7s linear infinite;
+      animation: lds-double-ring 1.7s linear infinite;
+    }
+
+    .lds-double-ring div:nth-child(2) {
+      width: 60px;
+      height: 60px;
+      top: 70px;
+      left: 70px;
+      border-color: transparent #774023 transparent #774023;
+      -webkit-animation: lds-double-ring_reverse 1.7s linear infinite;
+      animation: lds-double-ring_reverse 1.7s linear infinite;
+    }
+
+    .lds-double-ring {
+      width: 200px !important;
+      height: 200px !important;
+      -webkit-transform: translate(-100px, -100px) scale(1) translate(100px, 100px);
+      transform: translate(-100px, -100px) scale(1) translate(100px, 100px);
+    }
+  </style>
+</div>
 <div class="pricing-data">
   <ul>
     <li>
@@ -240,17 +383,18 @@
           <legend class="title" for="ticket-tier">Tier<span class="required">*</span></legend>
 
           <div class="form-item field required">
-            <input type="radio" name="ticket-tier" value="general" id="ticketTier_general"><label
-              for="ticketTier_general">General</label>
-            <input type="radio" name="ticket-tier" value="platinum" id="ticketTier_platinum"><label
-              for="ticketTier_platinum">Platinum</label>
-            <input type="radio" name="ticket-tier" value="student" id="ticketTier_student"><label
-              for="ticketTier_student">Student</label>
+            <input type="radio" name="ticket-tier" value="general" id="ticketTier_general"
+              class="js-price-control"><label for="ticketTier_general">General</label>
+            <input type="radio" name="ticket-tier" value="platinum" id="ticketTier_platinum"
+              class="js-price-control"><label for="ticketTier_platinum">Platinum</label>
+            <input type="radio" name="ticket-tier" value="student" id="ticketTier_student"
+              class="js-price-control"><label for="ticketTier_student">Student</label>
           </div>
 
           <div class="form-item field required">
-            <label for="num-tickets"># of Tickets<span class="required">*</span></label>
-            <input type="number" value="1" min="1" class="field-element" value=0 id="num-tickets" />
+            <label for="num-tickets"># of Tickets<span class="required">*</span>(max 10 per transaction)</label>
+            <input type="number" value="1" min="1" max="10" class="field-element js-price-control" value=0
+              id="num-tickets" />
           </div>
 
           <div id="attendee-data">
@@ -272,9 +416,16 @@
             </select>
           </div>
 
+          <h4>TOTAL: <span id="price">$0.00</span></h4>
+
           <div class="form-button-wrapper form-button-wrapper--align-left">
             <input class="button sqs-system-button sqs-editable-button" type="submit" value="Submit"
               id="submit-payment">
+          </div>
+
+          <div class="form-item field" style="margin-top: 20px">
+            <input id="allow-email" type="checkbox" class="checkbox sqs-system-checkbox" checked aria-checked><label
+              style="margin-left: 5px" for="allow-email">I want to receive Monero Community updates.</label>
           </div>
         </div>
       </div>

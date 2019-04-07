@@ -38,7 +38,7 @@ const appErrorResponse = {
     headers: {
         'Access-Control-Allow-Origin': '*',
     },
-    body: 'Internal application error',
+    body: JSON.stringify({ message: 'Internal application error' }),
 };
 
 const badRequestResponse = (message) => ({
@@ -46,7 +46,7 @@ const badRequestResponse = (message) => ({
     headers: {
         'Access-Control-Allow-Origin': '*',
     },
-    body: message || 'Bad Request',
+    body: JSON.stringify({ message: message || 'Bad Request' }),
 });
 
 // External APIs
@@ -149,7 +149,7 @@ const putStripeTransaction = (stripeResponse, tierInfo, attendees, paymentInfo) 
         expiresAt: null,
     };
 
-    const transactionObject = createTransactionObject(tierInfo, stripePaymentInfo, attendeeRecords);
+    const transactionObject = createTransactionObject(tierInfo, stripePaymentInfo, attendeeRecords, paymentInfo.allowEmail);
 
     console.log(`Transaction: ${JSON.stringify(transactionObject, undefined, 2)}`);
     const batchParams = {
@@ -171,7 +171,7 @@ const putStripeTransaction = (stripeResponse, tierInfo, attendees, paymentInfo) 
         });
 }
 
-const putGlobeeTransaction = (globeeResponse, tierInfo, attendees) => {
+const putGlobeeTransaction = (globeeResponse, tierInfo, attendees, paymentInfo) => {
     // create attendee records here and add to attendees on success! :D
     const attendeeRecords = createAttendeeData(tierInfo.inventory.current, tierInfo.partitionKey, attendees);
 
@@ -183,6 +183,7 @@ const putGlobeeTransaction = (globeeResponse, tierInfo, attendees) => {
             globeeResponse,
             { transactionType: 'globee' }),
         attendeeRecords,
+        paymentInfo.allowEmail,
     );
 
     const inventoryHolds = attendeeRecords
@@ -325,7 +326,7 @@ Current attendee list:
 
 <table width="600px">
 <tbody>
-${tierHtmlRows(attendeesByTier)}
+${tierHtmlRows(attendeesByTier).join('')}
 </tbody>
 </table>
 `;
@@ -342,8 +343,14 @@ Thank you for your purchase. If you need further assitance please contact us at 
 
 <p>
 Order Date: ${formattedDateTime()}
+</p>
+<p>
 Ticket Tier: ${transaction.PartitionKey.split('_')[1]}
+</p>
+<p>
 Quantity: ${transaction.Attendees.length}
+</p>
+<p>
 Amount: ${transaction.Amount}
 </p>
 
@@ -355,7 +362,7 @@ Amount: ${transaction.Amount}
   <td align="left">Institution</td>
   <td align="left">Confirmation Code</td>
 <tr>
-${transaction.Attendees.map(attendeeHtmlRow)}
+${transaction.Attendees.map(attendeeHtmlRow).join('')}
 </tbody>
 </table>
 `);
@@ -364,7 +371,7 @@ const tierHtmlRows = (attendeesByTier) => {
     return Object.keys(attendeesByTier)
         .map(tier => (`<tr>
 <td colspan="3">${tier}</td>
-</tr>${attendeesByTier[tier].map(attendeeHtmlRow)}`));
+</tr>${attendeesByTier[tier].map(attendeeHtmlRow).join('')}`));
 }
 
 const attendeeHtmlRow = (attendee) => (`<tr>
@@ -418,14 +425,14 @@ const createHash = (raw) => {
         .digest('hex');
 };
 
-const createTransactionObject = (tierInfo, paymentInfo, attendeeRecords) => ({
+const createTransactionObject = (tierInfo, paymentInfo, attendeeRecords, allowEmail) => ({
     PartitionKey: tierInfo.partitionKey,
     SortKey: `${sortKeys.prefixes.transaction}${paymentInfo.id}`,
     PaymentType: paymentInfo.transactionType,
     Status: [{ status: paymentInfo.status, date: isoDate() }],
     Amount: paymentInfo.total,
     Currency: paymentInfo.currency,
-    Customer: paymentInfo.customer,
+    Customer: Object.assign({}, paymentInfo.customer, { allowEmail }),
     ExpiresAt: paymentInfo.expiresAt || null,
     Attendees: attendeeRecords,
 });
@@ -435,7 +442,7 @@ const createAttendeeData = (inventory, partitionKey, attendees) => (attendees.ma
     // attendee hash = H(ticket-tier + name + institution + ticket number)
     return {
         name: attendee.name,
-        institution: attendee.institution,
+        institution: attendee.institution || null,
         identifier: createHash(`${partitionKey}${attendee.name}${attendee.institution}${inventory - idx}`),
     };
 }));
@@ -483,7 +490,7 @@ const formattedDateTime = (date = new Date()) => (
     `${date.toLocaleDateString('en-US', { year: 'numeric', month: 'long', day: 'numeric' })} ${date.toLocaleTimeString('en-US')}`
 );
 
-const paymentDetails = (tierItems, name, email, numTickets) => {
+const paymentDetails = (tierItems, name, email, numTickets, allowEmail) => {
     const partitionKey = tierItems[0].PartitionKey;
     const ticketPrice = getCurrentPrice(tierItems);
     const total = ticketPrice * numTickets;
@@ -494,28 +501,19 @@ const paymentDetails = (tierItems, name, email, numTickets) => {
         email,
         numTickets,
         partitionKey,
+        allowEmail,
     };
 };
 
 
 // Exported lambda functions
 module.exports.globeePayment = async (e) => {
-    /**
-     * Input schema:
-     * - purchaserName
-     * - purchaserEmail
-     * - tier general|student|platinum
-     * - attendees: [{
-     *      name,
-     *      institution?,
-     *    }]
-     */
-
     const {
         purchaserName,
         purchaserEmail,
         tier,
         attendees,
+        allowEmail,
     } = JSON.parse(e.body);
 
     if (tier === 'student' && !purchaserEmail.endsWith('.edu')) {
@@ -535,7 +533,11 @@ module.exports.globeePayment = async (e) => {
     }
 
     if (!(remainingInventory(rawTierData.Items) >= attendees.length)) {
-        return badRequestResponse(`No inventory for ${tier} available`);
+        return badRequestResponse(`Insufficient inventory for ${tier} available`);
+    }
+
+    if (attendees.length > 15) {
+        return badRequestResponse('Only 15 tickets may be purchased per transaction.');
     }
 
     const tierInfo = remapTier(rawTierData);
@@ -545,6 +547,7 @@ module.exports.globeePayment = async (e) => {
         purchaserName,
         purchaserEmail,
         attendees.length,
+        allowEmail,
     );
 
     let globeeResponse;
@@ -555,7 +558,7 @@ module.exports.globeePayment = async (e) => {
         return appErrorResponse;
     }
 
-    return putGlobeeTransaction(globeeResponse, tierInfo, attendees)
+    return putGlobeeTransaction(globeeResponse, tierInfo, attendees, paymentInfo)
         .then(() => ({
             statusCode: 201,
             headers: {
@@ -591,6 +594,7 @@ module.exports.stripePayment = async e => {
         purchaserEmail,
         tier,
         attendees,
+        allowEmail,
         token,
     } = JSON.parse(e.body);
 
@@ -621,6 +625,7 @@ module.exports.stripePayment = async e => {
         purchaserName,
         purchaserEmail,
         attendees.length,
+        allowEmail,
     );
 
     return createStripePayment(paymentInfo, token)
@@ -633,7 +638,9 @@ module.exports.stripePayment = async e => {
                 headers: {
                     'Access-Control-Allow-Origin': '*',
                 },
-                body: ''
+                body: JSON.stringify({
+                    redirectUrl: GLOBEE_SUCCESS_URL,
+                }),
             };
         })
         .catch(err => {

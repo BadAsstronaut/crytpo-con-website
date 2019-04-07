@@ -87,6 +87,7 @@ Resources:
         S3Key: !Ref S3InitKey
       Handler: index.handler
       Role: !GetAtt LambdaRole.Arn
+      Timeout: 20
       Runtime: nodejs8.10
 
   StripePaymentFunction:
@@ -97,6 +98,7 @@ Resources:
         S3Key: !Ref TicketPaymentsKey
       Handler: index.stripePayment
       Role: !GetAtt LambdaRole.Arn
+      Timeout: 5
       Runtime: nodejs8.10
 
   GlobeePaymentFunction:
@@ -107,6 +109,7 @@ Resources:
         S3Key: !Ref TicketPaymentsKey
       Handler: index.globeePayment
       Role: !GetAtt LambdaRole.Arn
+      Timeout: 15
       Runtime: nodejs8.10
 
   GlobeeWebhookFunction:
@@ -117,6 +120,7 @@ Resources:
         S3Key: !Ref TicketPaymentsKey
       Handler: index.globeePaymentWebhook
       Role: !GetAtt LambdaRole.Arn
+      Timeout: 20
       Runtime: nodejs8.10
 
   TicketInfoFunction:
@@ -127,6 +131,7 @@ Resources:
         S3Key: !Ref TicketPaymentsKey
       Handler: index.ticketPricesAndInventory
       Role: !GetAtt LambdaRole.Arn
+      Timeout: 5
       Runtime: nodejs8.10
 
   StripePaymentPermission:

@@ -27,6 +27,16 @@ Resources:
           KeyType: HASH
         - AttributeName: SortKey
           KeyType: RANGE
+      GlobalSecondaryIndexes:
+        - IndexName: SortKeyIndex
+          KeySchema:
+            - AttributeName: "SortKey"
+              KeyType: HASH
+          Projection:
+            ProjectionType: ALL
+          ProvisionedThroughput:
+            ReadCapacityUnits: 2
+            WriteCapacityUnits: 2
       ProvisionedThroughput:
         ReadCapacityUnits: 2
         WriteCapacityUnits: 2

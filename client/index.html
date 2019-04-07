@@ -74,7 +74,7 @@
     const submitGlobeePayment = () => {
       const payload = selectionDetails();
 
-      const endpoint = 'https://zeug267d9l.execute-api.us-east-2.amazonaws.com/v1/globee-payment';
+      const endpoint = 'https://m4479sepxd.execute-api.us-east-1.amazonaws.com/v1/globee-payment';
 
       fetch(endpoint, {
         method: 'post',
@@ -96,7 +96,7 @@
       const payload = selectionDetails();
       payload.token = token;
 
-      const endpoint = 'https://zeug267d9l.execute-api.us-east-2.amazonaws.com/v1/stripe-payment';
+      const endpoint = 'https://m4479sepxd.execute-api.us-east-1.amazonaws.com/v1/stripe-payment';
 
       fetch(endpoint, {
         method: 'post',
@@ -176,7 +176,7 @@
       minimumFractionDigits: 2
     });
 
-    const endpoint = 'https://zeug267d9l.execute-api.us-east-2.amazonaws.com/v1/ticket-info';
+    const endpoint = 'https://m4479sepxd.execute-api.us-east-1.amazonaws.com/v1/ticket-info';
 
     return fetch(endpoint)
       .then(result => (result.json()))

@@ -6,17 +6,22 @@ const aws = require('aws-sdk');
 const crypto = require('crypto');
 const requester = require('request-promise-native');
 const stripe = require('stripe')(process.env.STRIPE_AUTH);
+const sendGrid = require('@sendgrid/mail');
 
 const dynamoClient = new aws.DynamoDB.DocumentClient();
 
 const {
+    ADMIN_EMAIL,
     DYNAMO_TABLE,
     GLOBEE_AUTH,
     GLOBEE_CURRENCY,
     GLOBEE_SUCCESS_URL,
     GLOBEE_URL,
     GLOBEE_WEBHOOK_URL,
+    SENDGRID_API_KEY,
 } = process.env;
+
+sendGrid.setApiKey(SENDGRID_API_KEY);
 
 const sortKeys = {
     prefixes: {
@@ -107,11 +112,22 @@ const createStripePayment = (payment, token) => {
 
 // Dynamo-mite! (aka dynamo queries)
 const queryPartition = (pk) => {
-    // TODO: Make a query generator
     const params = {
         TableName: DYNAMO_TABLE,
         KeyConditionExpression: 'PartitionKey = :partitionKey',
         ExpressionAttributeValues: { ':partitionKey': pk },
+    };
+
+    return dynamoClient.query(params).promise()
+        .catch(err => { throw err; });
+};
+
+const querySortKey = (sk) => {
+    const params = {
+        TableName: DYNAMO_TABLE,
+        IndexName: "SortKeyIndex",
+        KeyConditionExpression: 'SortKey = :sortKey',
+        ExpressionAttributeValues: { ':sortKey': sk },
     };
 
     return dynamoClient.query(params).promise()
@@ -146,10 +162,13 @@ const putStripeTransaction = (stripeResponse, tierInfo, attendees, paymentInfo) 
         dynamoClient.batchWrite(batchParams).promise(),
         updateAttendees(tierInfo.partitionKey, attendeeRecords),
     ])
+        .then(() => {
+            return attendeeUpdateEmails(transactionObject);
+        })
         .catch(err => {
             console.error(`Error saving to dynamo: ${err.message}`);
-            throw error;
-        });;
+            throw err;
+        });
 }
 
 const putGlobeeTransaction = (globeeResponse, tierInfo, attendees) => {
@@ -243,6 +262,7 @@ const updateTransaction = async (updateData) => {
 
     if (status === 'paid') {
         promises.push(updateAttendees(partitionKey, transaction.Attendees));
+        promises.push(attendeeUpdateEmails(transaction));
     }
 
     return Promise.all(promises);
@@ -262,11 +282,106 @@ const updateAttendees = (partitionKey, attendees) => {
     return dynamoClient.update(updateParams).promise()
         .catch(err => {
             console.error(`Error saving attendees: ${err.message}`);
-            throw error;
+            throw err;
         });
 };
 
+// Sendgrid functions
+const attendeeUpdateEmails = (transaction) => {
+    return Promise.all([
+        updateAttendeesToAdmin(),
+        notifyPayorConfirmation(transaction),
+    ]);
+};
+
+const updateAttendeesToAdmin = () => {
+    return querySortKey('attendees')
+        .then(attendeesToTier)
+        .then(attendeesByTier => {
+            return sendGrid.send({
+                to: ADMIN_EMAIL,
+                from: 'konferenco@monerokon.com',
+                subject: `Upated attendee list ${formattedDateTime()}`,
+                html: adminUpdate(attendeesByTier),
+            });
+        })
+};
+
+const notifyPayorConfirmation = (transaction) => {
+    return sendGrid.send({
+        to: transaction.Customer.email,
+        from: 'konferenco@monerokon.com',
+        subject: 'Thank you for purchasing MoneroKon tickets',
+        html: attendeeConfirmation(transaction),
+    });
+};
+
+// Email templates
+const adminUpdate = (attendeesByTier) => {
+    return `
+<p>
+Current attendee list:
+</p>
+
+<table width="600px">
+<tbody>
+${tierHtmlRows(attendeesByTier)}
+</tbody>
+</table>
+`;
+};
+
+const attendeeConfirmation = (transaction) => (`
+<p>
+Dear ${transaction.Customer.name},
+</p>
+
+<p>
+Thank you for your purchase. If you need further assitance please contact us at <a href="mailto: ${ADMIN_EMAIL}">${ADMIN_EMAIL}</a>.
+</p>
+
+<p>
+Order Date: ${formattedDateTime()}
+Ticket Tier: ${transaction.PartitionKey.split('_')[1]}
+Quantity: ${transaction.Attendees.length}
+Amount: ${transaction.Amount}
+</p>
+
+<h4>Ticket details:</h4>
+<table width="600px">
+<tbody>
+<tr>
+  <td align="left">Attendee</td>
+  <td align="left">Institution</td>
+  <td align="left">Confirmation Code</td>
+<tr>
+${transaction.Attendees.map(attendeeHtmlRow)}
+</tbody>
+</table>
+`);
+
+const tierHtmlRows = (attendeesByTier) => {
+    return Object.keys(attendeesByTier)
+        .map(tier => (`<tr>
+<td colspan="3">${tier}</td>
+</tr>${attendeesByTier[tier].map(attendeeHtmlRow)}`));
+}
+
+const attendeeHtmlRow = (attendee) => (`<tr>
+<td>${attendee.name}</td>
+<td>${attendee.institution}</td>
+<td>${attendee.identifier}</td>
+</tr>`);
+
 // utility functions
+const attendeesToTier = (attendeeData) => {
+    return attendeeData.Items.reduce((result, item) => {
+        const tier = item.PartitionKey.split('_')[1];
+        result[tier] = item.AttendeeList;
+        return result;
+    }, {});
+};
+
 const remapTier = tierData => {
     const partitionKey = tierData.Items[0].PartitionKey;
     const tier = partitionKey.split('_')[1]
@@ -364,6 +479,10 @@ const isoDate = () => {
     return new Date().toISOString();
 };
 
+const formattedDateTime = (date = new Date()) => (
+    `${date.toLocaleDateString('en-US', { year: 'numeric', month: 'long', day: 'numeric' })} ${date.toLocaleTimeString('en-US')}`
+);
+
 const paymentDetails = (tierItems, name, email, numTickets) => {
     const partitionKey = tierItems[0].PartitionKey;
     const ticketPrice = getCurrentPrice(tierItems);
@@ -378,6 +497,8 @@ const paymentDetails = (tierItems, name, email, numTickets) => {
     };
 };
 
+
+// Exported lambda functions
 module.exports.globeePayment = async (e) => {
     /**
      * Input schema:

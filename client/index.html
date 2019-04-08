@@ -102,7 +102,7 @@
     const submitGlobeePayment = () => {
       const payload = selectionDetails();
 
-      const endpoint = 'https://m4479sepxd.execute-api.us-east-1.amazonaws.com/v1/globee-payment';
+      const endpoint = ' https://pdqvc7opzh.execute-api.us-east-1.amazonaws.com/v1/globee-payment';
 
       fetch(endpoint, {
         method: 'post',
@@ -138,7 +138,7 @@
       const payload = selectionDetails();
       payload.token = token;
 
-      const endpoint = 'https://m4479sepxd.execute-api.us-east-1.amazonaws.com/v1/stripe-payment';
+      const endpoint = ' https://pdqvc7opzh.execute-api.us-east-1.amazonaws.com/v1/stripe-payment';
 
       fetch(endpoint, {
         method: 'post',
@@ -184,7 +184,7 @@
 
     const openStripeCheckout = () => {
       const checkoutHandler = StripeCheckout.configure({
-        key: 'pk_test_p4dcZV04R8GTCqSRa1p8TvFl',
+        key: 'pk_live_UMgeOICMnhaaegQxvcJe7P0x',
         locale: 'auto',
       });
 
@@ -224,7 +224,7 @@
   };
 
   const ticketData = () => {
-    const endpoint = 'https://m4479sepxd.execute-api.us-east-1.amazonaws.com/v1/ticket-info';
+    const endpoint = ' https://pdqvc7opzh.execute-api.us-east-1.amazonaws.com/v1/ticket-info';
 
     const loadingOverlay = document.getElementById('loading-overlay');
 

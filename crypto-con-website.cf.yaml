@@ -193,7 +193,7 @@ Resources:
           - ResponseParameters:
               method.response.header.Access-Control-Allow-Headers: "'Content-Type,X-Api-Key'"
               method.response.header.Access-Control-Allow-Methods: "'GET,POST,OPTIONS'"
-              method.response.header.Access-Control-Allow-Origin: "'*'" # RESTRICT TO SITE BEFORE PROD!
+              method.response.header.Access-Control-Allow-Origin: "'monerokon.com'" # RESTRICT TO SITE BEFORE PROD!
             ResponseTemplates:
               application/json: ""
             StatusCode: "200"
@@ -241,7 +241,7 @@ Resources:
           - ResponseParameters:
               method.response.header.Access-Control-Allow-Headers: "'Content-Type,X-Api-Key'"
               method.response.header.Access-Control-Allow-Methods: "'GET,POST,OPTIONS'"
-              method.response.header.Access-Control-Allow-Origin: "'*'" # RESTRICT TO SITE BEFORE PROD!
+              method.response.header.Access-Control-Allow-Origin: "'monerokon.com'" # RESTRICT TO SITE BEFORE PROD!
             ResponseTemplates:
               application/json: ""
             StatusCode: "200"
